@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsEnum,
   IsInt,
   IsOptional,
   IsString,
@@ -13,6 +14,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { GenerationTaskSource } from '../entities/generation-task.entity';
 
 export class GenerationNodeRefDto {
   @ApiProperty({ description: '画布项目 ID' })
@@ -101,4 +103,13 @@ export class GenerateImageDto {
   @Type(() => GenerationNodeRefDto)
   @IsOptional()
   nodeRef?: GenerationNodeRefDto;
+
+  @ApiProperty({
+    required: false,
+    enum: GenerationTaskSource,
+    description: '任务来源：canvas 不在生成台列表显示；缺省时带 nodeRef 视为画布发起',
+  })
+  @IsEnum(GenerationTaskSource)
+  @IsOptional()
+  source?: GenerationTaskSource;
 }

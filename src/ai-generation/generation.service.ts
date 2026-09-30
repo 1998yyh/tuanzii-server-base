@@ -16,7 +16,11 @@ import { CanvasOpsService } from '../canvas/canvas-ops.service';
 import { AiChannelsService } from './ai-channels.service';
 import { ModelCapability } from './entities/ai-channel.entity';
 import { resolveVideoModelConfig } from './video-presets';
-import { GenerationTask, GenerationTaskStatus } from './entities/generation-task.entity';
+import {
+  GenerationTask,
+  GenerationTaskSource,
+  GenerationTaskStatus,
+} from './entities/generation-task.entity';
 import { GenerateImageDto } from './dto/generate-image.dto';
 import { GenerateVideoDto } from './dto/generate-video.dto';
 import { GenerateAudioDto } from './dto/generate-audio.dto';
@@ -150,6 +154,9 @@ export class GenerationService {
           referenceMediaIds: dto.referenceMediaIds,
         },
         nodeRef: dto.nodeRef ?? null,
+        // nodeRef 语义即「回填画布节点」，非空必为画布发起（Agent 工具路径显式传 canvas）
+        source:
+          dto.source ?? (dto.nodeRef ? GenerationTaskSource.CANVAS : GenerationTaskSource.STUDIO),
       }),
     );
 
@@ -437,6 +444,8 @@ export class GenerationService {
       .createQueryBuilder('t')
       .leftJoinAndMapOne('t.resultMedia', 't.resultMedia', 'rm')
       .where('t.user_id = :userId', { userId: user.id })
+      // 生成台只展示手动发起的任务；画布发起的同步生成落库仅作审计
+      .andWhere('t.source = :source', { source: GenerationTaskSource.STUDIO })
       .orderBy('t.createdAt', 'DESC')
       .skip((query.page - 1) * query.limit)
       .take(query.limit);

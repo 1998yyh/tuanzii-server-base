@@ -18,6 +18,7 @@ import { CanvasOpsService } from '../../../canvas/canvas-ops.service';
 import { CanvasDocument, CanvasNodeData } from '../../../canvas/canvas.types';
 import { CanvasAgentOp } from '../../../canvas/lib/canvas-ops';
 import { GenerationService } from '../../../ai-generation/generation.service';
+import { GenerationTaskSource } from '../../../ai-generation/entities/generation-task.entity';
 import { PromptsService } from '../../../prompts/prompts.service';
 import { AssetsService } from '../../../assets/assets.service';
 import { AssetKind } from '../../../assets/asset.entity';
@@ -588,6 +589,8 @@ export class CanvasToolsService implements OnModuleInit {
         size: meta.size,
         background: meta.background,
         referenceMediaIds: referenceMediaIds.length ? referenceMediaIds : undefined,
+        // 画布发起的图片生成标 canvas：记录落库作审计，但不在生成台列表显示
+        source: GenerationTaskSource.CANVAS,
       } as never);
       const ops: CanvasAgentOp[] = media.flatMap((m, index) => {
         const resultId = `image-${randomUUID()}`;

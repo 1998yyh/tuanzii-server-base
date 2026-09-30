@@ -21,6 +21,12 @@ export enum GenerationTaskStatus {
   CANCELLED = 'cancelled',
 }
 
+/** 任务来源：生成台列表只展示 studio；canvas 落库仅作审计，不在生成台显示 */
+export enum GenerationTaskSource {
+  STUDIO = 'studio',
+  CANVAS = 'canvas',
+}
+
 /** 生成结果回填画布节点的引用 */
 export interface GenerationNodeRef {
   projectId: string;
@@ -89,6 +95,9 @@ export class GenerationTask {
   /** 关联的画布节点（生成完成后回填） */
   @Column({ name: 'node_ref', type: 'json', nullable: true })
   nodeRef: GenerationNodeRef | null;
+
+  @Column({ type: 'enum', enum: GenerationTaskSource, default: GenerationTaskSource.STUDIO })
+  source: GenerationTaskSource;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

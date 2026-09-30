@@ -5,6 +5,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import { GenerationService } from 'src/ai-generation/generation.service';
 import {
   GenerationTask,
+  GenerationTaskSource,
   GenerationTaskStatus,
 } from 'src/ai-generation/entities/generation-task.entity';
 import { AiChannelsService } from 'src/ai-generation/ai-channels.service';
@@ -65,6 +66,7 @@ describe('GenerationService', () => {
     resultExtra: null,
     error: null,
     nodeRef: null,
+    source: GenerationTaskSource.STUDIO,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -291,6 +293,63 @@ describe('GenerationService', () => {
           error: '接口限流，请稍后重试',
         }),
       );
+    });
+
+    it('缺省来源标 studio，带 nodeRef 或显式传参标 canvas', async () => {
+      aiChannelsService.findWithKey.mockResolvedValue({ channel, apiKey: 'k' });
+      mockedGenerateImages.mockResolvedValue([{ kind: 'b64', data: 'eA==' }]);
+      taskRepo.findOne.mockResolvedValue(task);
+
+      // 生成台手动发起：无 nodeRef 无 source → studio
+      await service.generateImage(user as never, dto as never);
+      expect(taskRepo.create).toHaveBeenLastCalledWith(
+        expect.objectContaining({ source: GenerationTaskSource.STUDIO }),
+      );
+
+      // 前端画布直调：带 nodeRef → 兜底推断 canvas
+      await service.generateImage(
+        user as never,
+        {
+          ...dto,
+          nodeRef: { projectId: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d', nodeId: 'n1' },
+        } as never,
+      );
+      expect(taskRepo.create).toHaveBeenLastCalledWith(
+        expect.objectContaining({ source: GenerationTaskSource.CANVAS }),
+      );
+
+      // Agent 工具路径：无 nodeRef 但显式传 canvas
+      await service.generateImage(
+        user as never,
+        {
+          ...dto,
+          source: GenerationTaskSource.CANVAS,
+        } as never,
+      );
+      expect(taskRepo.create).toHaveBeenLastCalledWith(
+        expect.objectContaining({ source: GenerationTaskSource.CANVAS }),
+      );
+    });
+  });
+
+  describe('findTasks', () => {
+    it('生成台列表只查 studio 来源的任务', async () => {
+      const qb = {
+        leftJoinAndMapOne: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn(async () => [[], 0]),
+      };
+      taskRepo.createQueryBuilder.mockReturnValue(qb as never);
+
+      await service.findTasks(user as never, { page: 1, limit: 20 } as never);
+
+      expect(qb.andWhere).toHaveBeenCalledWith('t.source = :source', {
+        source: GenerationTaskSource.STUDIO,
+      });
     });
   });
 
