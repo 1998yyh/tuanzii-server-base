@@ -34,10 +34,11 @@ src/
   prompts/        # 内部提示词库（MySQL 正文 + 用途分类；指定维护者管理公共库，显式追加导入）
   assets/         # 素材库 text/image/video（媒体挂 media_id FK）
   uploads/        # ⚠️ 孤儿模块：Multer 磁盘配置，未在 app.module 注册
+  logs/           # 应用文件日志（14天/2GiB）+ 管理员单日分页查询，生产目录独立挂载
   common/         # guards / decorators / filters / crypto.util / ssrf.util
 ```
 
-- 功能模块在 `src/app.module.ts` 注册。当前：`AuthModule`、`UsersModule`、`DailyReportsModule`、`AgentsModule`、`McpServersModule`、`SkillsModule`、`StockSignalsModule`、`MediaModule`、`AiGenerationModule`、`CanvasModule`、`PromptsModule`、`AssetsModule`、`StockStrategiesModule`、`StockMarketModule`、`StockScreeningModule`、`StockResearchModule`、`StockAlertsModule`。新增模块必须手动加进 `imports`。
+- 功能模块在 `src/app.module.ts` 注册。当前：`LogsModule`、`AuthModule`、`UsersModule`、`DailyReportsModule`、`AgentsModule`、`McpServersModule`、`SkillsModule`、`StockSignalsModule`、`MediaModule`、`AiGenerationModule`、`CanvasModule`、`PromptsModule`、`AssetsModule`、`StockStrategiesModule`、`StockMarketModule`、`StockScreeningModule`、`StockResearchModule`、`StockAlertsModule`。新增模块必须手动加进 `imports`。
 - **模块依赖方向（无环）**：`CanvasModule ← AiGenerationModule ← AgentsModule`。`AiGenerationModule` 用 `TypeOrmModule.forFeature([AgentConfig])` 做渠道删除引用检查，**不** import `AgentsModule`。新增依赖必须保持无环。
 - **画布平台**（2026-08 从 infinite-canvas 迁移，AGPL-3.0，见根目录 NOTICE 与 `docs/plans/2026-08-07-canvas-platform-design.md`）：画布文档 = `canvas_projects.document` JSON 列 + `version` 乐观锁。所有写路径（前端整文档保存 / Agent ops / 生成回填）走 `CanvasDocumentService.applyMutation`；`CanvasOpsService` 是上层 ops 入口。视频生成任务化（POST 立即返回 taskId，`GenerationPollerService` cron 10s 轮询回填）。**自定义调用脚本 v1 不支持**（服务端 `new Function` = RCE，决策见设计文档 §1；`ChannelModel.script` 只保留字段形状）。
 - `uploads/` 目录（仓库根）存封面图与媒体；`main.ts` 静态服务在 `/uploads/` 前缀（在 `/api` 之外，前端拼 URL 要补 origin）。静态响应带 `X-Content-Type-Options: nosniff` 与 CSP sandbox（防存储型 XSS）。媒体落盘目录是 `uploads/media`（`MediaService.MEDIA_DIR`）。
@@ -204,6 +205,10 @@ Agent **不再内嵌** provider / apiKey / baseUrl / model。运行时链路：
 - 修改策略定义、版本或删除行为前，阅读 `docs/plans/2026-09-12-stock-strategies-impl.md`。`StockStrategiesService` 使用带 userId/version/deletedAt 的条件 UPDATE 防止覆盖；固定模板不落库、不提供写接口。
 - 观澜观察池使用 `ResearchWatch`，不是原 B/S 信号的 `StockWatchlist`。研究上下文与同用户会话事务保存；筛选 AI 只接受本任务有效候选，最多30只。参阅 `docs/plans/2026-09-12-stock-research-impl.md`。
 - 当前筛选任务、会话锁和行情缓存仅支持单应用实例，不能部署多副本。`deliveryStatus=queued` 不能解释为推送成功。运行边界见 `docs/plans/2026-09-12-guanlan-runbook.md`。
+
+## 应用日志
+
+- 修改日志采集、查询或生产挂载前，阅读 `docs/plans/2026-09-14-logging-design.md`。只记录诊断白名单字段；SSE 失败看 `agent.run.failed`，不能按 HTTP 200 判成功。`/api/admin/logs` 仅管理员可访问，日志目录不注册为静态资源。
 
 ## 测试要求
 

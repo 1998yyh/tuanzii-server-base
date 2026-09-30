@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { LogsModule } from './logs/logs.module';
 import { StockMarketModule } from './stock-market/stock-market.module';
 import { StockScreeningModule } from './stock-screening/stock-screening.module';
 import { StockAlertsModule } from './stock-alerts/stock-alerts.module';
@@ -44,6 +45,7 @@ import { AssetsModule } from './assets/assets.module';
       inject: [ConfigService],
     }),
 
+    LogsModule,
     AuthModule,
     UsersModule,
     DailyReportsModule,

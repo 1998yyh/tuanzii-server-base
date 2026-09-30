@@ -572,6 +572,16 @@ export class AgentExecutorService {
       config.modelName,
     );
     const search = prepareNativeWebSearch(resolved, tools);
+    this.logger.log({
+      event: 'model.config.resolved',
+      message: '对话模型配置已解析',
+      agentId: config.id,
+      channelId: resolved.channelId,
+      apiFormat: resolved.apiFormat,
+      modelName: resolved.model,
+      searchKind: search.kind,
+      upstreamHost: new URL(resolved.baseUrl).hostname,
+    });
     let model: BaseChatModel;
     switch (resolved.apiFormat) {
       case ApiFormat.ANTHROPIC:

@@ -5,13 +5,20 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { json, urlencoded } from 'express';
 import { join } from 'path';
 import { AppModule } from './app.module';
+import { FileLogger, requestLogging } from './logs/file-logger';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     // 关闭默认 bodyParser，手动配置以放宽 JSON 上限：
     // 画布文档是单列大 JSON，express 默认 100kb 会成为「无限画布」保存的隐性天花板
     bodyParser: false,
+    bufferLogs: true,
   });
+
+  const logger = app.get(FileLogger);
+  app.useLogger(logger);
+  app.enableShutdownHooks();
+  app.use(requestLogging(logger));
 
   app.use(json({ limit: '5mb' }));
   app.use(urlencoded({ extended: true, limit: '5mb' }));
@@ -40,9 +47,9 @@ async function bootstrap() {
   // 未配置时放开 origin 但关闭 credentials（origin: '*' 与 credentials: true 互斥，浏览器会拒绝）
   const corsOrigins = process.env.CORS_ORIGINS?.split(',').filter(Boolean);
   if (corsOrigins?.length) {
-    app.enableCors({ origin: corsOrigins, credentials: true });
+    app.enableCors({ origin: corsOrigins, credentials: true, exposedHeaders: ['X-Request-Id'] });
   } else {
-    app.enableCors({ origin: '*' });
+    app.enableCors({ origin: '*', exposedHeaders: ['X-Request-Id'] });
   }
 
   // API 前缀
@@ -62,9 +69,9 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
-  console.log(`🚀 Application is running on: http://localhost:${port}/api`);
+  logger.log(`🚀 Application is running on: http://localhost:${port}/api`);
   if (process.env.NODE_ENV !== 'production') {
-    console.log(`📚 Swagger docs: http://localhost:${port}/api/docs`);
+    logger.log(`📚 Swagger docs: http://localhost:${port}/api/docs`);
   }
 }
 bootstrap();

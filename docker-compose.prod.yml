@@ -29,12 +29,19 @@ services:
     environment:
       # 连 compose 内部网络的服务名，别写 localhost
       DB_HOST: mysql
+      LOG_DIRECTORY: /var/log/tuanzi
     ports:
       # 只绑回环地址，对外走 Nginx 反代，别直接裸奔
       - '127.0.0.1:3000:3000'
     volumes:
       # 封面图等上传文件持久化，容器重建不丢
       - ./uploads:/app/uploads
+      - /var/log/tuanzi:/var/log/tuanzi
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
     depends_on:
       mysql:
         condition: service_healthy

@@ -15,6 +15,9 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
+import { randomUUID } from 'node:crypto';
+import { errorFields } from '../logs/log-record';
+import { logContext } from '../logs/file-logger';
 import { User } from '../users/users.entity';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -81,6 +84,18 @@ export class ConversationsController {
       // NestJS @Sse() 仅支持 GET，POST 流式需手动设响应头
       const conversation = await this.conversationsService.prepareStream(user.id, id);
 
+      const startedAt = Date.now();
+      const runFields = {
+        conversationId: id,
+        runId: randomUUID(),
+        agentId: conversation.agentConfig?.id,
+        channelId: conversation.agentConfig?.channelId,
+        modelName: conversation.agentConfig?.modelName,
+      };
+      Object.assign(logContext.getStore() ?? {}, runFields);
+      this.logger.log({ ...runFields, event: 'agent.run.started', message: '开始对话执行' });
+      let outcome = 'completed';
+
       res.status(200);
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -100,10 +115,14 @@ export class ConversationsController {
           { signal: abortController.signal },
         )) {
           // 断线中止后不再向已关闭的响应写数据
-          if (abortController.signal.aborted) break;
+          if (abortController.signal.aborted) {
+            outcome = 'cancelled';
+            break;
+          }
           try {
             res.write(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
           } catch (writeErr) {
+            outcome = 'cancelled';
             // 响应已关闭（客户端断线）时 res.write 可能抛错：停止写入，交由 close 路径收尾
             this.logger.warn(
               `会话 ${id} 响应写入失败，停止 SSE 推送: ${(writeErr as Error).message}`,
@@ -112,13 +131,20 @@ export class ConversationsController {
           }
         }
       } catch (e) {
+        outcome = abortController.signal.aborted ? 'cancelled' : 'failed';
         if (abortController.signal.aborted) {
           // 断线中止导致的异常：客户端已不在，无需（也无法）发送 error 事件
           this.logger.warn(`会话 ${id} 客户端断开，已中止流式执行`);
         } else {
           // 流式执行中的任意异常：响应头已 flush、状态码无法再改，只能以 SSE error 事件透出。
-          // 完整原文进服务端日志；前端只拿到分类 code + 固定中文文案（不外泄上游细节）。
-          this.logger.error(`会话 ${id} 流式执行异常: ${(e as Error).message}`, (e as Error).stack);
+          // 服务端仅记录脱敏错误摘要；前端保持分类 code + 固定中文文案。
+          this.logger.error({
+            ...runFields,
+            ...errorFields(e),
+            event: 'agent.run.failed',
+            outcome,
+            durationMs: Date.now() - startedAt,
+          });
           const { code, message } = classifyStreamError(e);
           try {
             res.write(`event: error\ndata: ${JSON.stringify({ code, message })}\n\n`);
@@ -127,6 +153,15 @@ export class ConversationsController {
           }
         }
       } finally {
+        if (outcome === 'completed' && abortController.signal.aborted) outcome = 'cancelled';
+        if (outcome !== 'failed')
+          this.logger.log({
+            ...runFields,
+            event: `agent.run.${outcome}`,
+            outcome,
+            message: outcome === 'cancelled' ? '对话已中止' : '对话执行完成',
+            durationMs: Date.now() - startedAt,
+          });
         res.removeListener('close', onClose);
         res.end();
       }
