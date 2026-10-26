@@ -9,10 +9,18 @@ import { SinaScannerService } from './sina-scanner.service';
 import { WatchlistController } from './watchlist.controller';
 import { WatchlistService } from './watchlist.service';
 import { WatchlistCronService } from './watchlist-cron.service';
+import { StockSectorsController } from './stock-sectors.controller';
+import { StockSectorsService } from './stock-sectors.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([StockSignalScanRun, StockSignal, StockWatchlist])],
-  controllers: [StockSignalsController, WatchlistController],
-  providers: [StockSignalsService, SinaScannerService, WatchlistService, WatchlistCronService],
+  controllers: [StockSignalsController, WatchlistController, StockSectorsController],
+  providers: [
+    StockSignalsService,
+    SinaScannerService,
+    WatchlistService,
+    WatchlistCronService,
+    StockSectorsService,
+  ],
 })
 export class StockSignalsModule {}
