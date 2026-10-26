@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { MoreThan, Repository } from 'typeorm';
+import { And, LessThanOrEqual, MoreThan, Repository } from 'typeorm';
 import { StockSignal } from './entities/stock-signal.entity';
 import { StockWatchlist, WatchlistStatus } from './entities/watchlist.entity';
 import { MAIN_BOARD_CODE, StockSignalsService } from './stock-signals.service';
@@ -21,11 +21,14 @@ export interface AddWatchlistResult {
   overflow: string[];
   /** 入池后的完整池子（triggered 排前，其余按创建时间倒序） */
   items: StockWatchlist[];
+  /** 新入池条目历史检查失败的代码；入池本身成功，稍后可手动重试。 */
+  checkFailed: string[];
 }
 
 export interface CheckWatchlistResult {
-  /** 本次刷新信号的池内代码数 */
+  /** 成功读取历史信号的待观察代码数；已触发条目不重复刷新 */
   checked: number;
+  failed: string[];
   /** 本次 S 评估新触发的条目数 */
   triggered: number;
   items: StockWatchlist[];
@@ -105,13 +108,13 @@ export class WatchlistService {
       });
     }
 
+    let checkFailed: string[] = [];
     if (toInsert.length) {
       const newRows = await this.watchRepo.save(this.watchRepo.create(toInsert));
-      // 入池即时 S 判定：历史信号里可能已有 S（入池依据日之后），直接置 triggered
-      await this.evaluateWatching(newRows);
+      checkFailed = (await this.refreshAndEvaluate(newRows)).failed;
     }
 
-    return { added, invalid, duplicated, overflow, items: await this.list(userId) };
+    return { added, invalid, duplicated, overflow, checkFailed, items: await this.list(userId) };
   }
 
   /** 删除：只能删自己的；他人 id 一律 404，不泄露存在性 */
@@ -124,22 +127,25 @@ export class WatchlistService {
   }
 
   /**
-   * 手动立即检查：池内全部代码走 codes 模式强制刷新当日信号，再对 watching 项跑 S 评估。
-   * 空池子短路（scanCodes 不接受空数组语义，且无需外呼）。
+   * 手动检查补齐入池依据日之后的历史 S，再按统一规则评估；已触发项保持状态。
    */
   async check(userId: string): Promise<CheckWatchlistResult> {
     const rows = await this.list(userId);
-    if (rows.length) {
-      const date = this.signalsService.chinaToday();
-      await this.signalsService.refreshCodes(
-        date,
-        rows.map((r) => `${r.market}${r.code}`),
-      );
-    }
-    const triggered = await this.evaluateWatching(
-      rows.filter((r) => r.status === WatchlistStatus.WATCHING),
-    );
-    return { checked: rows.length, triggered, items: await this.list(userId) };
+    return { ...(await this.refreshAndEvaluate(rows)), items: await this.list(userId) };
+  }
+
+  /** 定时任务直接补查所有待观察股票，不依赖当天全市场扫描是否有结果。 */
+  async checkAllWatching() {
+    const rows = await this.watchRepo.find({ where: { status: WatchlistStatus.WATCHING } });
+    return this.refreshAndEvaluate(rows);
+  }
+
+  private async refreshAndEvaluate(rows: StockWatchlist[]) {
+    const watching = rows.filter((row) => row.status === WatchlistStatus.WATCHING);
+    if (!watching.length) return { checked: 0, failed: [] as string[], triggered: 0 };
+    const result = await this.signalsService.refreshWatchlistHistory(watching);
+    // 某只上游失败时，数据库中已确认存在的 S 仍可触发；失败代码另外报告。
+    return { ...result, triggered: await this.evaluateWatching(watching) };
   }
 
   /**
@@ -157,15 +163,25 @@ export class WatchlistService {
     let triggered = 0;
     for (const row of watching) {
       const s = await this.signalRepo.findOne({
-        where: { code: row.code, value: '0', signalDate: MoreThan(row.entrySignalDate) },
+        where: {
+          code: row.code,
+          value: '0',
+          signalDate: And(
+            MoreThan(row.entrySignalDate),
+            LessThanOrEqual(this.signalsService.chinaToday()),
+          ),
+        },
         order: { signalDate: 'DESC' },
       });
       if (!s) continue;
-      await this.watchRepo.update(row.id, {
-        status: WatchlistStatus.TRIGGERED,
-        triggeredSignalDate: s.signalDate,
-      });
-      triggered += 1;
+      const update = await this.watchRepo.update(
+        { id: row.id, userId: row.userId, status: WatchlistStatus.WATCHING },
+        {
+          status: WatchlistStatus.TRIGGERED,
+          triggeredSignalDate: s.signalDate,
+        },
+      );
+      triggered += update.affected ?? 0;
     }
     return triggered;
   }

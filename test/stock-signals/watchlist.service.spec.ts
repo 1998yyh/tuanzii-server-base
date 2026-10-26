@@ -32,13 +32,17 @@ describe('WatchlistService', () => {
       findOne: jest.fn(),
       create: jest.fn((v) => v),
       save: jest.fn(async (v) => v),
-      update: jest.fn(),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
       remove: jest.fn(),
     };
     signalRepo = { findOne: jest.fn() };
     signalsService = {
       chinaToday: jest.fn().mockReturnValue('2026-08-25'),
       refreshCodes: jest.fn(),
+      refreshWatchlistHistory: jest.fn(async (items: StockWatchlist[]) => ({
+        checked: new Set(items.map((item) => item.code)).size,
+        failed: [],
+      })),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -71,10 +75,13 @@ describe('WatchlistService', () => {
           order: { signalDate: 'DESC' },
         }),
       );
-      expect(watchRepo.update).toHaveBeenCalledWith('w-1', {
-        status: WatchlistStatus.TRIGGERED,
-        triggeredSignalDate: '2026-08-24',
-      });
+      expect(watchRepo.update).toHaveBeenCalledWith(
+        { id: 'w-1', userId: 'user-1', status: WatchlistStatus.WATCHING },
+        {
+          status: WatchlistStatus.TRIGGERED,
+          triggeredSignalDate: '2026-08-24',
+        },
+      );
     });
 
     it('入池依据日通过 MoreThan 传入查询（严格大于，等于入池日的 S 不算）', async () => {
@@ -82,8 +89,11 @@ describe('WatchlistService', () => {
       await service.evaluateWatching([makeRow({ entrySignalDate: '2026-08-22' })]);
       const where = signalRepo.findOne.mock.calls[0][0].where;
       // FindOperator：type=moreThan、value=入池依据日（即 signal_date > 该日，等于不算）
-      expect(where.signalDate.type).toBe('moreThan');
-      expect(where.signalDate.value).toBe('2026-08-22');
+      expect(where.signalDate.type).toBe('and');
+      expect(where.signalDate.value[0].type).toBe('moreThan');
+      expect(where.signalDate.value[0].value).toBe('2026-08-22');
+      expect(where.signalDate.value[1].type).toBe('lessThanOrEqual');
+      expect(where.signalDate.value[1].value).toBe('2026-08-25');
       expect(triggeredCount(watchRepo)).toBe(0);
     });
 
@@ -189,10 +199,13 @@ describe('WatchlistService', () => {
       ]);
 
       expect(res.added).toEqual(['600519']);
-      expect(watchRepo.update).toHaveBeenCalledWith('w-new', {
-        status: WatchlistStatus.TRIGGERED,
-        triggeredSignalDate: '2026-08-22',
-      });
+      expect(watchRepo.update).toHaveBeenCalledWith(
+        { id: 'w-new', userId: 'user-1', status: WatchlistStatus.WATCHING },
+        {
+          status: WatchlistStatus.TRIGGERED,
+          triggeredSignalDate: '2026-08-22',
+        },
+      );
     });
   });
 
@@ -220,12 +233,13 @@ describe('WatchlistService', () => {
     it('空池子短路：不刷新不评估', async () => {
       watchRepo.find.mockResolvedValue([]);
       const res = await service.check('user-1');
-      expect(res).toEqual({ checked: 0, triggered: 0, items: [] });
+      expect(res).toEqual({ checked: 0, triggered: 0, failed: [], items: [] });
       expect(signalsService.refreshCodes).not.toHaveBeenCalled();
+      expect(signalsService.refreshWatchlistHistory).not.toHaveBeenCalled();
       expect(signalRepo.findOne).not.toHaveBeenCalled();
     });
 
-    it('非空池子：全部代码强制刷新当日信号，再对 watching 项评估', async () => {
+    it('非空池子：补查待观察项历史信号，已触发项保持且不重复检查', async () => {
       const rows = [
         makeRow(),
         makeRow({ id: 'w-2', code: '000001', market: 'sz', status: WatchlistStatus.TRIGGERED }),
@@ -239,15 +253,48 @@ describe('WatchlistService', () => {
 
       const res = await service.check('user-1');
 
-      // list 排序 triggered 排前，故 w-2（triggered）在 w-1（watching）之前
-      expect(signalsService.refreshCodes).toHaveBeenCalledWith('2026-08-25', [
-        'sz000001',
-        'sh600519',
+      expect(signalsService.refreshWatchlistHistory).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 'w-1', status: WatchlistStatus.WATCHING }),
       ]);
+      expect(signalsService.refreshCodes).not.toHaveBeenCalled();
       // triggered 行不参与评估（只对 watching 项查信号）
       expect(signalRepo.findOne).toHaveBeenCalledTimes(1);
-      expect(res.checked).toBe(2);
+      expect(res.checked).toBe(1);
       expect(res.triggered).toBe(1);
+    });
+
+    it('源站失败单独返回，已缓存的历史 S 仍能触发', async () => {
+      watchRepo.find.mockResolvedValue([makeRow()]);
+      signalsService.refreshWatchlistHistory.mockResolvedValue({
+        checked: 0,
+        failed: ['SH600519'],
+      });
+      signalRepo.findOne.mockResolvedValue({ signalDate: '2026-08-24' });
+      expect(await service.check('user-1')).toMatchObject({
+        checked: 0,
+        failed: ['SH600519'],
+        triggered: 1,
+      });
+    });
+
+    it('全部已触发时不请求源站，也不重复统计新增 S', async () => {
+      watchRepo.find.mockResolvedValue([makeRow({ status: WatchlistStatus.TRIGGERED })]);
+      expect(await service.check('user-1')).toMatchObject({ checked: 0, failed: [], triggered: 0 });
+      expect(signalsService.refreshWatchlistHistory).not.toHaveBeenCalled();
+    });
+
+    it('并发检查已由另一请求触发时，不重复计算新增', async () => {
+      signalRepo.findOne.mockResolvedValue({ signalDate: '2026-08-24' });
+      watchRepo.update.mockResolvedValue({ affected: 0 });
+      expect(await service.evaluateWatching([makeRow()])).toBe(0);
+    });
+
+    it('定时检查补查全站 waiting 项后再评估', async () => {
+      const rows = [makeRow(), makeRow({ id: 'w-2', userId: 'user-2' })];
+      watchRepo.find.mockResolvedValue(rows);
+      signalRepo.findOne.mockResolvedValue(null);
+      expect(await service.checkAllWatching()).toEqual({ checked: 1, failed: [], triggered: 0 });
+      expect(signalsService.refreshWatchlistHistory).toHaveBeenCalledWith(rows);
     });
   });
 

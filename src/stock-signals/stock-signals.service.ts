@@ -343,6 +343,41 @@ export class StockSignalsService implements OnModuleInit {
     return this.scanCodes(date, codes, true);
   }
 
+  /** 补齐观察区间的历史 S：每只股票只请求一次，去重后按最早入池依据日取区间。 */
+  async refreshWatchlistHistory(items: Array<StockListItem & { entrySignalDate: string }>) {
+    const byCode = new Map<string, StockListItem & { entrySignalDate: string }>();
+    for (const item of items) {
+      const previous = byCode.get(item.code);
+      if (!previous || item.entrySignalDate < previous.entrySignalDate) {
+        byCode.set(item.code, { ...item, ...(this.stockMap.get(item.code) ?? {}) });
+      }
+    }
+    if (!byCode.size) return { checked: 0, failed: [] as string[] };
+    const { results, failures } = await this.scanner.scanHistory([...byCode.values()]);
+    const today = this.chinaToday();
+    const rows: Array<Partial<StockSignal>> = [];
+    for (const { item, signals } of results) {
+      const since = byCode.get(item.code)!.entrySignalDate;
+      for (const [date, value] of Object.entries(signals)) {
+        if (value !== '0' || date <= since || date > today) continue;
+        rows.push({
+          signalDate: date,
+          code: item.code,
+          market: item.market,
+          name: item.name,
+          value,
+          runId: null,
+        });
+      }
+    }
+    for (let i = 0; i < rows.length; i += UPSERT_CHUNK) {
+      await this.signalRepo.upsert(rows.slice(i, i + UPSERT_CHUNK), {
+        conflictPaths: ['signalDate', 'code'],
+      });
+    }
+    return { checked: results.length, failed: failures };
+  }
+
   // ---- 私有工具 ----
 
   private latestRun(date: string) {

@@ -11,13 +11,13 @@ import type { StockListItem } from './stock-list.data';
  * 超时放弃本轮评估（下一轮 cron 或手动 check 会补上），不无限挂住 cron。
  */
 const RUN_TIMEOUT_MS = 30 * 60 * 1000;
-/** 节假日探针用票：浦发银行（沪市蓝筹，upbs 在交易日必有当日键） */
+/** 当日事件探针：只保留原全市场扫描触发条件；无当日键不能证明休市。 */
 const PROBE: StockListItem = { code: '600000', market: 'sh', name: '浦发银行' };
 
 /**
  * 观察池每日例行（Asia/Shanghai，周一至五）：
  *   10:00 早盘一轮、14:50 尾盘一轮，流程均为
- *   「节假日探针 → 当日全市场扫描（refresh 强制重抓，等落定）→ 全站观察池 S 评估」。
+ *   先独立补查全站观察池历史 S，再执行原当日扫描流程。
  * 单实例假设：与 BackgroundTasksService / GenerationPollerService 一致，多实例部署需加 leader 锁。
  */
 @Injectable()
@@ -49,10 +49,15 @@ export class WatchlistCronService {
     }
     this.running = true;
     try {
+      // 观察池先独立补查历史，不能被当日探针缺失或全市场扫描失败阻断。
+      const history = await this.watchlistService.checkAllWatching();
+      this.logger.log(
+        `观察池 ${label} 历史检查：成功 ${history.checked} 只，新增 ${history.triggered} 项，失败 ${history.failed.length} 只`,
+      );
       const today = this.signalsService.chinaToday();
 
-      // 1. 节假日探针：upbs 返回里没有今天的键 = 非交易日，整天跳过。
-      //    探针本身失败（网络故障等）同样跳过——全市场扫描也只会大面积失败。
+      // 1. 当日事件探针只控制后续市场扫描，不能阻断已经执行的历史补查。
+      //    upbs 是稀疏事件表，无当日键不能据此判断非交易日。
       let probeValue: string | null;
       try {
         probeValue = (await this.scanner.fetchOne(PROBE, today)).value;
@@ -61,7 +66,7 @@ export class WatchlistCronService {
         return;
       }
       if (probeValue === null) {
-        this.logger.log(`${today} 非交易日（探针无当日数据），${label} 轮跳过扫描与评估`);
+        this.logger.log(`${today} 探针无当日信号，${label} 轮跳过当日扫描；观察池历史检查已完成`);
         return;
       }
 

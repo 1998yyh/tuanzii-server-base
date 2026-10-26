@@ -68,9 +68,10 @@ export class WatchlistController {
   @ApiBearerAuth()
   @ApiOperation({
     summary: '手动立即检查',
-    description: '强制刷新池内全部代码当日信号（codes 模式），再对 watching 项跑 S 评估',
+    description:
+      '补查待观察股票在入池依据日之后的历史 S，再评估触发；已触发项保持，失败代码单独返回',
   })
-  @ApiResponse({ status: 200, description: '检查完成，返回刷新数/新触发数与完整池子' })
+  @ApiResponse({ status: 200, description: '返回成功检查数、新触发数、失败代码 failed 与完整池子' })
   @ApiResponse({ status: 401, description: '未授权' })
   async check(@CurrentUser() user: Omit<User, 'password'>) {
     return this.watchlistService.check(user.id);
