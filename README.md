@@ -157,3 +157,7 @@ src/
 ISC
 
 本项目包含从 [infinite-canvas](https://github.com/basketikun/infinite-canvas)（AGPL-3.0）移植/改写的代码，相关文件头部有来源注释，详见根目录 [NOTICE](NOTICE)。
+
+## 股票扫描记录保留期
+
+扫描任务及 B/空值缓存仅保留上海日期最近 30 个自然日（含今天），应用启动后和每天 00:10 自动清理。进行中扫描的整个日期暂不清理；观察池依赖的历史 S 事件独立保留。查询和新扫描接口同步限制窗口，详见 [实现与发布说明](docs/plans/2026-10-27-scan-history-retention-impl.md)。

@@ -6,13 +6,14 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Between, In, Repository } from 'typeorm';
 import type { User } from '../users/users.entity';
 import { ScanRunStatus, StockSignalScanRun } from './entities/scan-run.entity';
 import { StockSignal } from './entities/stock-signal.entity';
 import { STOCK_LIST, type StockListItem } from './stock-list.data';
 import { SinaScannerService } from './sina-scanner.service';
 import type { CreateScanDto } from './dto/create-scan.dto';
+import { firstRetainedScanDate, scanHistoryToday } from './scan-history-window';
 
 type CurrentUser = Omit<User, 'password'>;
 
@@ -83,6 +84,7 @@ export class StockSignalsService implements OnModuleInit {
     if (date > this.chinaToday()) {
       throw new BadRequestException('不能查询未来日期');
     }
+    this.assertRetainedScanDate(date);
     if (this.isWeekend(date)) {
       throw new BadRequestException('周末没有交易数据，请选择交易日');
     }
@@ -114,6 +116,12 @@ export class StockSignalsService implements OnModuleInit {
   async getRun(id: string) {
     const run = await this.runRepo.findOne({ where: { id } });
     if (!run) throw new NotFoundException(`扫描任务 #${id} 不存在`);
+    if (
+      run.queryDate < firstRetainedScanDate(this.chinaToday()) &&
+      (run.status === ScanRunStatus.DONE || run.status === ScanRunStatus.FAILED)
+    ) {
+      throw new NotFoundException('扫描记录仅保留最近 30 天');
+    }
     const { createdBy, ...rest } = run;
     if (run.status !== ScanRunStatus.DONE) return { run: rest };
     return { run: rest, items: await this.findBItems(run.queryDate) };
@@ -124,6 +132,9 @@ export class StockSignalsService implements OnModuleInit {
   /** 某日结果明细：取该日期最新 done 任务，没有则 404（前端据此提示「尚未扫描」） */
   async getByDate(date: string) {
     this.assertValidDate(date);
+    if (date < firstRetainedScanDate(this.chinaToday())) {
+      throw new NotFoundException('扫描记录仅保留最近 30 天');
+    }
     const run = await this.latestDoneRun(date);
     if (!run) throw new NotFoundException('该日期还没有扫描数据，请先发起扫描');
     return {
@@ -137,10 +148,14 @@ export class StockSignalsService implements OnModuleInit {
     };
   }
 
-  /** 历史日期列表：每个有 done 任务的日期取最新一次 */
+  /** 最近 30 个自然日：每个有 done 任务的日期取最新一次。 */
   async getDates() {
+    const today = this.chinaToday();
     const runs = await this.runRepo.find({
-      where: { status: ScanRunStatus.DONE },
+      where: {
+        status: ScanRunStatus.DONE,
+        queryDate: Between(firstRetainedScanDate(today), today),
+      },
       order: { queryDate: 'DESC', createdAt: 'DESC' },
     });
     const seen = new Set<string>();
@@ -300,6 +315,8 @@ export class StockSignalsService implements OnModuleInit {
    * 系统触发，createdBy 置 null。调用方需自行保证 date 是合法交易日。
    */
   async ensureMarketRun(date: string, refresh = false): Promise<StockSignalScanRun> {
+    this.assertValidDate(date);
+    this.assertRetainedScanDate(date);
     const latest = await this.latestRun(date);
     if (latest?.status === ScanRunStatus.PENDING || latest?.status === ScanRunStatus.RUNNING) {
       return latest;
@@ -380,6 +397,13 @@ export class StockSignalsService implements OnModuleInit {
 
   // ---- 私有工具 ----
 
+  private assertRetainedScanDate(date: string): void {
+    const today = this.chinaToday();
+    if (date < firstRetainedScanDate(today) || date > today) {
+      throw new BadRequestException('仅支持最近 30 天内的扫描日期（含今天）');
+    }
+  }
+
   private latestRun(date: string) {
     return this.runRepo.findOne({
       where: { queryDate: date },
@@ -424,15 +448,6 @@ export class StockSignalsService implements OnModuleInit {
 
   /** 北京时间今天（YYYY-MM-DD）；public：观察池 cron 复用 */
   chinaToday(): string {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Shanghai',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).formatToParts(new Date());
-    const v = Object.fromEntries(
-      parts.filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]),
-    );
-    return `${v.year}-${v.month}-${v.day}`;
+    return scanHistoryToday();
   }
 }

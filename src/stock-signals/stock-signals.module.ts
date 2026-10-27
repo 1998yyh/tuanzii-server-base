@@ -13,6 +13,7 @@ import { StockSectorsController } from './stock-sectors.controller';
 import { StockSectorsService } from './stock-sectors.service';
 import { StockPerformanceController } from './stock-performance.controller';
 import { StockPerformanceService } from './stock-performance.service';
+import { StockScanRetentionService } from './stock-scan-retention.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([StockSignalScanRun, StockSignal, StockWatchlist])],
@@ -29,6 +30,7 @@ import { StockPerformanceService } from './stock-performance.service';
     WatchlistCronService,
     StockSectorsService,
     StockPerformanceService,
+    StockScanRetentionService,
   ],
 })
 export class StockSignalsModule {}

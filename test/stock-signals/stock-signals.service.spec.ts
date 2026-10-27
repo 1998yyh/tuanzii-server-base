@@ -60,6 +60,7 @@ describe('StockSignalsService', () => {
     }).compile();
 
     service = module.get(StockSignalsService);
+    jest.spyOn(service, 'chinaToday').mockReturnValue('2026-07-31');
   });
 
   describe('requestScan（全市场）', () => {
@@ -203,6 +204,49 @@ describe('StockSignalsService', () => {
     });
   });
 
+  describe('近 30 天扫描窗口', () => {
+    it('含今天与第 30 天，超期扫描拒绝且不写库或抓取', async () => {
+      runRepo.findOne.mockResolvedValue(makeRun({ queryDate: '2026-07-02' }));
+      await expect(service.requestScan(user, { date: '2026-07-02' })).resolves.toHaveProperty(
+        'cached',
+        true,
+      );
+      await expect(service.requestScan(user, { date: '2026-07-01' })).rejects.toThrow('最近 30 天');
+      await expect(
+        service.requestScan(user, { date: '2026-07-01', codes: ['600519'] }),
+      ).rejects.toThrow('最近 30 天');
+      await expect(service.ensureMarketRun('2026-07-01')).rejects.toThrow('最近 30 天');
+      expect(runRepo.save).not.toHaveBeenCalled();
+      expect(scanner.scan).not.toHaveBeenCalled();
+    });
+
+    it('超期按日读取直接 404，不依赖定时清理是否已成功', async () => {
+      await expect(service.getByDate('2026-07-01')).rejects.toThrow(NotFoundException);
+      expect(runRepo.find).not.toHaveBeenCalled();
+      expect(signalRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('超期终态任务 404，进行中任务继续提供进度', async () => {
+      runRepo.findOne.mockResolvedValue(makeRun({ queryDate: '2026-07-01' }));
+      await expect(service.getRun('run-1')).rejects.toThrow(NotFoundException);
+      runRepo.findOne.mockResolvedValue(
+        makeRun({ queryDate: '2026-07-01', status: ScanRunStatus.RUNNING }),
+      );
+      await expect(service.getRun('run-1')).resolves.toHaveProperty(
+        'run.status',
+        ScanRunStatus.RUNNING,
+      );
+    });
+
+    it('历史列表的数据库查询限制在上海今天与第 30 天之间', async () => {
+      runRepo.find.mockResolvedValue([]);
+      await service.getDates();
+      const queryDate = runRepo.find.mock.calls[0][0].where.queryDate;
+      expect(queryDate.type).toBe('between');
+      expect(queryDate.value).toEqual(['2026-07-02', '2026-07-31']);
+    });
+  });
+
   describe('结果查询', () => {
     it('getByDate：无 done 任务抛 404', async () => {
       runRepo.find.mockResolvedValue([]);
@@ -274,6 +318,7 @@ describe('StockSignalsService', () => {
     });
 
     it('闰年 2024-02-29 是有效日期，正常放行', async () => {
+      jest.spyOn(service, 'chinaToday').mockReturnValue('2024-03-01');
       runRepo.findOne.mockResolvedValue(makeRun({ id: 'run-leap', queryDate: '2024-02-29' }));
       scanner.scan.mockResolvedValue({ results: [], failures: [] });
       await expect(service.requestScan(user, { date: '2024-02-29' })).resolves.toBeDefined();
