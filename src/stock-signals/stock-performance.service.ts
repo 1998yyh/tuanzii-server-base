@@ -9,7 +9,7 @@ export interface StockPerformance {
   dayReason: string | null;
   sinceReason: string | null;
   quoteAsOf: string | null;
-  source: 'eastmoney';
+  source: 'eastmoney' | 'tencent';
   adjustment: 'qfq';
   fetchedAt: string;
 }
@@ -22,6 +22,11 @@ interface EastmoneyHistory {
 interface EastmoneyQuotes {
   rc: number;
   data: Record<string, unknown> | null;
+}
+
+interface TencentResponse {
+  code: number;
+  data?: Record<string, { qfqday?: unknown; qt?: Record<string, unknown> }>;
 }
 
 @Injectable()
@@ -79,6 +84,20 @@ export class StockPerformanceService {
   }
 
   private async load(date: string, code: string): Promise<StockPerformance> {
+    const primary = await this.loadEastmoney(date, code);
+    if (this.coverage(primary) === 2) return primary;
+    const backup = await this.loadTencent(date, code);
+    // 整只股票选择一个来源；备用没有更完整时保留东财有效的部分数据。
+    return this.coverage(backup) > this.coverage(primary) ? backup : primary;
+  }
+
+  private coverage(item: StockPerformance): number {
+    const day = item.dayPercent !== null;
+    const since = item.sincePercent !== null || (day && item.sinceReason === '基准日未收盘');
+    return Number(day) + Number(since);
+  }
+
+  private async loadEastmoney(date: string, code: string): Promise<StockPerformance> {
     const item: StockPerformance = {
       code,
       date,
@@ -189,6 +208,96 @@ export class StockPerformanceService {
     }
   }
 
+  private async loadTencent(date: string, code: string): Promise<StockPerformance> {
+    const item: StockPerformance = {
+      code,
+      date,
+      dayPercent: null,
+      sincePercent: null,
+      dayReason: '行情暂不可用',
+      sinceReason: '行情暂不可用',
+      quoteAsOf: null,
+      source: 'tencent',
+      adjustment: 'qfq',
+      fetchedAt: new Date().toISOString(),
+    };
+    try {
+      const symbol = `${code.startsWith('6') ? 'sh' : 'sz'}${code}`;
+      const start = new Date(`${date}T00:00:00Z`);
+      start.setUTCDate(start.getUTCDate() - 45);
+      const url = new URL('https://web.ifzq.gtimg.cn/appstock/app/fqkline/get');
+      url.searchParams.set('param', `${symbol},day,${start.toISOString().slice(0, 10)},,640,qfq`);
+      const body = (await this.json(url)) as TencentResponse;
+      const stock = body.data?.[symbol];
+      if (body.code !== 0 || !stock || !Array.isArray(stock.qfqday)) return item;
+      const quote = stock.qt?.[symbol];
+      const quoteTime =
+        Array.isArray(quote) && quote[2] === code ? this.tencentQuoteTime(quote[30]) : null;
+      const price = Array.isArray(quote) ? this.price(quote[3]) : null;
+      item.quoteAsOf = quoteTime;
+      const quoteDate = quoteTime
+        ? new Date(new Date(quoteTime).getTime() + 8 * 3600000).toISOString().slice(0, 10)
+        : null;
+      const now = new Date(Date.now() + 8 * 3600000);
+      const today = now.toISOString().slice(0, 10);
+      const quoteClock = quoteTime
+        ? new Date(new Date(quoteTime).getTime() + 8 * 3600000).toISOString().slice(11, 16)
+        : '';
+      const unclosed =
+        date === today &&
+        (now.toISOString().slice(11, 16) < '15:00' || quoteDate !== date || quoteClock < '15:00');
+      if (date === today) {
+        const percent = quoteDate === date && Array.isArray(quote) ? this.number(quote[32]) : null;
+        if (percent !== null && price !== null) {
+          item.dayPercent = percent;
+          item.dayReason = null;
+        } else item.dayReason = '无当日报价';
+        if (unclosed) item.sinceReason = '基准日未收盘';
+      }
+      // 不回退到未复权 day，不能把两种价格口径混算。
+      const bars = stock.qfqday.map((row: unknown) => {
+        if (!Array.isArray(row) || typeof row[0] !== 'string') throw new Error('日线格式无效');
+        const day = row[0];
+        const parsed = new Date(`${day}T00:00:00Z`);
+        const close = this.price(row[2]);
+        if (
+          !/^\d{4}-\d{2}-\d{2}$/.test(day) ||
+          Number.isNaN(parsed.getTime()) ||
+          parsed.toISOString().slice(0, 10) !== day ||
+          close === null
+        )
+          throw new Error('日线数据无效');
+        return { date: day, close };
+      });
+      if (bars.some((bar, index) => index > 0 && bars[index - 1].date >= bar.date)) return item;
+      const index = bars.findIndex((bar) => bar.date === date);
+      if (index < 0) {
+        if (date !== today || item.dayPercent === null) item.dayReason = '无该日行情';
+        item.sinceReason = unclosed ? '基准日未收盘' : '无基准日收盘价';
+        return item;
+      }
+      const baseline = bars[index];
+      if (date !== today) {
+        if (index > 0) {
+          item.dayPercent = this.percent(baseline.close, bars[index - 1].close);
+          item.dayReason = null;
+        } else item.dayReason = '缺少前一交易日价格';
+      }
+
+      if (unclosed) item.sinceReason = '基准日未收盘';
+      else if (!quoteTime || !quoteDate || quoteDate < date || price === null)
+        item.sinceReason = '无有效最新报价';
+      else {
+        item.sincePercent = this.percent(price, baseline.close);
+        item.sinceReason = null;
+      }
+      item.fetchedAt = new Date().toISOString();
+      return item;
+    } catch {
+      return item;
+    }
+  }
+
   private number(value: unknown): number | null {
     if ((typeof value !== 'string' && typeof value !== 'number') || String(value).trim() === '')
       return null;
@@ -214,14 +323,34 @@ export class StockPerformanceService {
     return parsed.toISOString();
   }
 
+  private tencentQuoteTime(value: unknown): string | null {
+    if (typeof value !== 'string' || !/^\d{14}$/.test(value)) return null;
+    const date = `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
+    const parsed = new Date(
+      `${date}T${value.slice(8, 10)}:${value.slice(10, 12)}:${value.slice(12)}+08:00`,
+    );
+    if (
+      Number.isNaN(parsed.getTime()) ||
+      parsed.getTime() > Date.now() + 60000 ||
+      new Date(parsed.getTime() + 8 * 3600000).toISOString().slice(0, 10) !== date
+    )
+      return null;
+    return parsed.toISOString();
+  }
   private async json(url: URL): Promise<unknown> {
     await assertPublicUrl(url.href);
     const response = await fetch(url, {
       redirect: 'error',
       signal: AbortSignal.timeout(8000),
-      headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://quote.eastmoney.com/' },
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        Referer:
+          url.hostname === 'web.ifzq.gtimg.cn'
+            ? 'https://gu.qq.com/'
+            : 'https://quote.eastmoney.com/',
+      },
     });
-    if (!response.ok) throw new Error('东方财富行情请求失败');
+    if (!response.ok) throw new Error('行情请求失败');
     return response.json();
   }
 }
