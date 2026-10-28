@@ -171,4 +171,4 @@ ISC
 - 可选环境项：`XIAOFEIYU_WEBHOOK_KEY`（32–256 字符），留空仅关闭推送，不影响共享后台启动。不要写进前端或日志。
 - DDL：`docs/plans/2026-10-28-xiaofeiyu-diary.sql`，遵守原有发布迁移流程。旧 SQLite 需显式离线导入，不自动执行。
 
-详见 [实现与迁移说明](docs/plans/2026-10-28-xiaofeiyu-diary-impl.md)。此次仅功能分支和 PR，未执行生产 DDL、数据导入或部署；合并 main 会触发本仓库原有自动部署。
+详见 [实现与迁移说明](docs/plans/2026-10-28-xiaofeiyu-diary-impl.md)。功能已通过 [PR #17](https://github.com/1998yyh/tuanzii-server-base/pull/17) 合并，用户随后允许该次 main 自动部署继续，[发布运行](https://github.com/1998yyh/tuanzii-server-base/actions/runs/40653906640) 成功，新表与本机未认证401已只读核对。未导入旧数据、未发送推送、未发布前端；Webhook密钥尚未配置。原有main自动发布策略不变。
