@@ -6,7 +6,7 @@
 
 ## 代码结构
 
-`src/xiaofeiyu-diary/` 包含 entity、DTO、管理员与内部推送守卫、Service、读写 Controller、Webhook Controller、Module。AppModule 注册模块，ConfigModule 沿用全局配置。Controller 不接触 Repository，响应显式挑选字段，DTO 使用 Swagger 和 class-validator。
+`src/xiaofeiyu-diary/` 包含 entity、DTO、JWT认证与内部推送守卫、Service、读写 Controller、Webhook Controller、Module。AppModule 注册模块，ConfigModule 沿用全局配置。Controller 不接触 Repository，响应显式挑选字段，DTO 使用 Swagger 和 class-validator。
 
 实体 `xiaofeiyu_diary_entries`：UUID id、title varchar(300)、content mediumtext、is_read、created_at/updated_at datetime(6)，索引 created_at/id 与 is_read/created_at。DDL 位于同日 SQL，synchronize 保持 false，原 ddl_history 自动执行流程不变。
 
@@ -16,14 +16,14 @@
 
 | 方法与路径 | 说明 | 权限 |
 | --- | --- | --- |
-| GET /api/xiaofeiyu/entries | q、unread=0/1、page、limit | 现有 access JWT + admin |
+| GET /api/xiaofeiyu/entries | q、unread=0/1、page、limit | 现有有效access JWT，所有用户 |
 | POST /api/xiaofeiyu/entries/:uuid/read | 单篇已读，UUID Pipe | 同上 |
 | POST /api/xiaofeiyu/entries/read-all | 全部已读 | 同上 |
 | POST /api/internal/xiaofeiyu/webhook | 摘要持久化，201仅回ID | 本机直连 + 独立密钥 |
 
 列表返回 `{items,total,page,limit,totalPages,allTotal,unread,hasMore}`；total 为筛选后数量，allTotal/unread 为全局计数。条目 `{id,title,text,createdAt,read}`，按接收时间和ID倒序。搜索用参数化 LOCATE，百分号/下划线按字面量处理。分页默认30、最多100，页码从1开始，最多1000000。不提供并发插入时快照一致性。
 
-普通用户403，未登录/无效/refresh token 401，JwtStrategy 每次读取当前用户，撤销admin后立即生效。日记和已读状态按管理员共享；不新增 userId 私有本。已读操作幂等，找不到404。前端复用原 login/profile，仅 sessionStorage 保存access token，过期重新登录；旧独立Cookie会话不迁移。
+所有登录用户均可访问，未登录/无效/refresh token 401；JwtStrategy每次读取当前用户，账号删除后原令牌失效。日记和已读状态由所有登录用户共享；不新增 userId 私有本。已读操作幂等，找不到404。前端复用原 login/profile，仅 sessionStorage 保存access token，过期重新登录；旧独立Cookie会话不迁移。
 
 ## Webhook
 
@@ -60,3 +60,7 @@ pnpm exec ts-node scripts/import-xiaofeiyu-sqlite.ts --source /absolute/path/to/
 ## 验证与限制
 
 本地 lint、typecheck、build、额外脚本eslint，以及全部73个Jest套件/813项测试通过，其中新增39项覆盖真实JwtStrategy、角色撤销、refresh token拒绝、DTO、UUID、Webhook边界、Service查询/幂等与迁移转换。测试依赖使用mock，不连接生产或真实MySQL。生产构建入口存在且离线脚本未进入dist。SQL执行、真实Docker私网、Nginx和MySQL联调/导入尚未执行，需在后续获准发布时验收。
+
+## 登录用户开放范围调整（2026-10-28）
+
+用户明确选择向所有已登录账号开放，取消管理员限制，保留登录。移除日记AdminGuard和前端login/profile角色判断；列表、单篇已读、全部已读均仅要求现有有效access JWT。普通用户放行，未登录、伪造/过期/refresh令牌及账号删除仍拒绝。不改变共享日记与已读语义，不改数据库或Webhook边界，也不调整其他模块管理员权限。旧实现验证记录中的角色撤销拒绝属于调整前的行为，本次回归改为降级后仍可读、账号删除后拒绝。

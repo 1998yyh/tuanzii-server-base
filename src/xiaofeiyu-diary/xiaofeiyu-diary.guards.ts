@@ -10,7 +10,6 @@ import { ConfigService } from '@nestjs/config';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { BlockList, isIP } from 'node:net';
 import { Request } from 'express';
-import { UserRole } from '../users/users.entity';
 
 const localNetworks = new BlockList();
 localNetworks.addSubnet('127.0.0.0', 8, 'ipv4');
@@ -19,17 +18,6 @@ localNetworks.addSubnet('172.16.0.0', 12, 'ipv4');
 localNetworks.addSubnet('192.168.0.0', 16, 'ipv4');
 localNetworks.addAddress('::1', 'ipv6');
 localNetworks.addSubnet('fc00::', 7, 'ipv6');
-
-@Injectable()
-export class XiaofeiyuDiaryAdminGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest<{ user?: { role?: UserRole } }>();
-    if (request.user?.role !== UserRole.ADMIN) {
-      throw new ForbiddenException('这本日记仅向管理员开放');
-    }
-    return true;
-  }
-}
 
 @Injectable()
 export class XiaofeiyuDiaryWebhookGuard implements CanActivate {

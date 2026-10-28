@@ -10,10 +10,7 @@ import { UsersService } from 'src/users/users.service';
 import { UserRole } from 'src/users/users.entity';
 import { XiaofeiyuDiaryController } from 'src/xiaofeiyu-diary/xiaofeiyu-diary.controller';
 import { XiaofeiyuDiaryWebhookController } from 'src/xiaofeiyu-diary/xiaofeiyu-diary-webhook.controller';
-import {
-  XiaofeiyuDiaryAdminGuard,
-  XiaofeiyuDiaryWebhookGuard,
-} from 'src/xiaofeiyu-diary/xiaofeiyu-diary.guards';
+import { XiaofeiyuDiaryWebhookGuard } from 'src/xiaofeiyu-diary/xiaofeiyu-diary.guards';
 import { XiaofeiyuDiaryService } from 'src/xiaofeiyu-diary/xiaofeiyu-diary.service';
 
 describe('小肥鱼日记HTTP与真实JWT边界', () => {
@@ -23,6 +20,7 @@ describe('小肥鱼日记HTTP与真实JWT边界', () => {
   let userToken: string;
   let refreshToken: string;
   let role = UserRole.ADMIN;
+  let userExists = true;
   let hookKey: string | undefined;
   const key = 'test-only-webhook-key-'.repeat(3);
   const jwt = new JwtService({ secret: 'test-only-signing-key' });
@@ -48,7 +46,6 @@ describe('小肥鱼日记HTTP与真实JWT边界', () => {
       controllers: [XiaofeiyuDiaryController, XiaofeiyuDiaryWebhookController],
       providers: [
         JwtStrategy,
-        XiaofeiyuDiaryAdminGuard,
         XiaofeiyuDiaryWebhookGuard,
         { provide: XiaofeiyuDiaryService, useValue: diary },
         {
@@ -65,12 +62,15 @@ describe('小肥鱼日记HTTP与真实JWT边界', () => {
         {
           provide: UsersService,
           useValue: {
-            findById: async (id: string) => ({
-              id,
-              role: id === 'admin' ? role : UserRole.USER,
-              username: '测试账号',
-              password: '仅测试',
-            }),
+            findById: async (id: string) =>
+              userExists
+                ? {
+                    id,
+                    role: id === 'admin' ? role : UserRole.USER,
+                    username: '测试账号',
+                    password: '仅测试',
+                  }
+                : null,
           },
         },
       ],
@@ -91,6 +91,7 @@ describe('小肥鱼日记HTTP与真实JWT边界', () => {
   beforeEach(() => {
     hookKey = key;
     role = UserRole.ADMIN;
+    userExists = true;
     jest.clearAllMocks();
   });
   afterAll(async () => app.close());
@@ -112,8 +113,8 @@ describe('小肥鱼日记HTTP与真实JWT边界', () => {
     for (const token of ['', 'invalid', refreshToken])
       expect((await list('', token)).status).toBe(401);
   });
-  it('普通用户不能阅读或标记已读', async () => {
-    expect((await list('', userToken)).status).toBe(403);
+  it('普通用户可以阅读并标记单篇和全部已读', async () => {
+    expect((await list('', userToken)).status).toBe(200);
     expect(
       (
         await fetch(base + '/api/xiaofeiyu/entries/read-all', {
@@ -121,7 +122,17 @@ describe('小肥鱼日记HTTP与真实JWT边界', () => {
           headers: { Authorization: 'Bearer ' + userToken },
         })
       ).status,
-    ).toBe(403);
+    ).toBe(201);
+    expect(
+      (
+        await fetch(base + '/api/xiaofeiyu/entries/11111111-1111-4111-8111-111111111111/read', {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + userToken },
+        })
+      ).status,
+    ).toBe(201);
+    expect(diary.markAllRead).toHaveBeenCalledTimes(1);
+    expect(diary.markRead).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111');
   });
   it('有效管理员返回标准分页及no-store', async () => {
     const response = await list('?page=1&limit=30');
@@ -129,10 +140,24 @@ describe('小肥鱼日记HTTP与真实JWT边界', () => {
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(await response.json()).toMatchObject({ items: [], page: 1, totalPages: 0 });
   });
-  it('管理员角色撤销后原令牌立即被权限守卫拒绝', async () => {
+  it('管理员降为普通用户后仍能阅读', async () => {
     role = UserRole.USER;
-    expect((await list()).status).toBe(403);
+    expect((await list()).status).toBe(200);
   });
+  it('账号删除后原令牌仍被拒绝', async () => {
+    userExists = false;
+    expect((await list()).status).toBe(401);
+    expect(diary.findAll).not.toHaveBeenCalled();
+  });
+  it.each(['read-all', '11111111-1111-4111-8111-111111111111/read'])(
+    '匿名用户不能标记已读：%s',
+    async (suffix) => {
+      const response = await fetch(base + '/api/xiaofeiyu/entries/' + suffix, { method: 'POST' });
+      expect(response.status).toBe(401);
+      expect(diary.markAllRead).not.toHaveBeenCalled();
+      expect(diary.markRead).not.toHaveBeenCalled();
+    },
+  );
   it.each(['?page=0', '?limit=101', '?unread=true', '?q=' + 'x'.repeat(201), '?userId=other'])(
     '拒绝无效查询%s',
     async (query) => {

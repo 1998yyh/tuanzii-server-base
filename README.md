@@ -164,7 +164,7 @@ ISC
 
 ## 小肥鱼日记
 
-日记前端独立，后台作为 Nest 模块复用现有 JWT、管理员角色和 MySQL。提供分页/搜索/未读筛选、单篇/全部已读，以及仅供本机直连的密钥 Webhook。普通账号不能阅读，多管理员共享日记及已读状态。
+日记前端独立，后台作为 Nest 模块复用现有JWT、账号身份和MySQL。提供分页/搜索/未读筛选、单篇/全部已读，以及仅供本机直连的密钥 Webhook。所有已登录账号均可阅读和标记已读，不限制管理员角色；所有登录用户共享日记及已读状态。
 
 - 阅读：`GET /api/xiaofeiyu/entries`，写已读：`POST /api/xiaofeiyu/entries/:uuid/read`、`POST /api/xiaofeiyu/entries/read-all`。
 - 推送：`POST /api/internal/xiaofeiyu/webhook`，`X-Xiaofeiyu-Key` 请求头或兼容 query key；公网 Nginx 必须阻断此路径及 API 别名。
