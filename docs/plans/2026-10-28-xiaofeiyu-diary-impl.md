@@ -60,3 +60,9 @@ pnpm exec ts-node scripts/import-xiaofeiyu-sqlite.ts --source /absolute/path/to/
 ## 验证与限制
 
 本地 lint、typecheck、build、额外脚本eslint，以及全部73个Jest套件/813项测试通过，其中新增39项覆盖真实JwtStrategy、角色撤销、refresh token拒绝、DTO、UUID、Webhook边界、Service查询/幂等与迁移转换。测试依赖使用mock，不连接生产或真实MySQL。生产构建入口存在且离线脚本未进入dist。SQL执行、真实Docker私网、Nginx和MySQL联调/导入尚未执行，需在后续获准发布时验收。
+
+## 后续获准发布结果（2026-10-28）
+
+初始实现完成后，GitHub账号1998yyh合并PR #17。用户明确允许该次自动部署继续，运行40653906640成功，main提交24ad12b。原流程已执行DDL、重建共享容器并通过健康检查；只读核对本机日记接口401和新表六个字段通过。前文“未执行生产DDL/部署”指初始交付阶段，此节记录后续状态。
+
+未执行SQLite导入、真实管理员读写或推送；未发布独立前端，入口仍404。Webhook密钥未配置，推送保持关闭，不自动修改GitHub Secret或插件。代码回归仍为73套件/813项。此次补充仅文档，不更改线上配置或重复触发发布。
