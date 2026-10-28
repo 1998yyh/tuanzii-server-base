@@ -19,6 +19,7 @@ import { AiGenerationModule } from './ai-generation/ai-generation.module';
 import { CanvasModule } from './canvas/canvas.module';
 import { PromptsModule } from './prompts/prompts.module';
 import { AssetsModule } from './assets/assets.module';
+import { XiaofeiyuDiaryModule } from './xiaofeiyu-diary/xiaofeiyu-diary.module';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { AssetsModule } from './assets/assets.module';
     CanvasModule,
     PromptsModule,
     AssetsModule,
+    XiaofeiyuDiaryModule,
   ],
 })
 export class AppModule {}
