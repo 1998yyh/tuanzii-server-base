@@ -6,9 +6,9 @@
 - 背景与目标：用户明确要求所有已登录账号可使用日记本，保留登录，不以admin角色限制。
 - 变更及文件：日记Controller仅保留JwtAuthGuard，删除本模块AdminGuard和Module注册；Swagger说明、README、CLAUDE和实现文档同步。HTTP回归保留真实JwtStrategy，覆盖普通用户列表/单篇已读/全部已读，降级继续访问、账号删除及匿名写操作拒绝。
 - 影响范围：仅小肥鱼日记；共享日记和已读状态语义保留，其他模块权限、Webhook私网/密钥、JWT有效期、CORS与synchronize不变。
-- 验证：本地lint、typecheck、build及完整73套件/816项Jest通过；发布状态待完成后补录；不连接真实数据库，不写生产日记。
+- 验证：本地lint、typecheck、build及完整73套件/816项Jest通过；[后台Actions 40661018421](https://github.com/1998yyh/tuanzii-server-base/actions/runs/40661018421) 已成功；通过线上Controller元数据只读核对仅有JwtAuthGuard，无AdminGuard。未用真实账号读取日记或写已读。
 - 兼容与迁移：无DDL、数据或账号迁移；前后端需配套发布。回退对应两端代码可恢复管理员限制，数据库无变化。
-- 发布：按用户已确认的GitHub流程先后台后前端；本记录会补充实际结果，不提前宣称上线。
+- 发布：[PR #19](https://github.com/1998yyh/tuanzii-server-base/pull/19) 已合并，main提交aeed868通过原GitHub流程发布成功，无新增DDL；配套前端PR #8已合并，正按前端工作流发布。
 
 ## 2026-10-28 — 整合小肥鱼日记后台
 
