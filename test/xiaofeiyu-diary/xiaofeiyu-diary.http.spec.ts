@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { Test } from '@nestjs/testing';
+import { json } from 'express';
 import { TokenType } from 'src/auth/auth.service';
 import { JwtStrategy } from 'src/auth/jwt.strategy';
 import { UsersService } from 'src/users/users.service';
@@ -74,7 +75,8 @@ describe('小肥鱼日记HTTP与真实JWT边界', () => {
         },
       ],
     }).compile();
-    app = module.createNestApplication();
+    app = module.createNestApplication({ bodyParser: false });
+    app.use(json({ limit: '5mb' }));
     app.setGlobalPrefix('api');
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
@@ -163,6 +165,11 @@ describe('小肥鱼日记HTTP与真实JWT边界', () => {
   it('缺少或错误密钥拒绝收信', async () => {
     expect((await receive({ text: '正文' }, '')).status).toBe(403);
     expect((await receive({ text: '正文' }, '?key=wrong')).status).toBe(403);
+  });
+  it('即使共享应用允许5mb正文，日记也拒绝超过256KiB的推送', async () => {
+    // 字符数未超过DTO上限，但UTF-8实际字节数超限，必须在入库前拒绝。
+    expect((await receive({ text: '鱼'.repeat(90000) })).status).toBe(413);
+    expect(diary.receive).not.toHaveBeenCalled();
   });
   it.each(['X-Forwarded-For', 'Forwarded', 'X-Real-IP'])(
     '拒绝从反代入口进入的请求：%s',

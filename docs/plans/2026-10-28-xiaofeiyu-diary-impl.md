@@ -59,4 +59,4 @@ pnpm exec ts-node scripts/import-xiaofeiyu-sqlite.ts --source /absolute/path/to/
 
 ## 验证与限制
 
-本地 lint、typecheck、build、额外脚本eslint，以及全部73个Jest套件/812项测试通过，其中新增38项覆盖真实JwtStrategy、角色撤销、refresh token拒绝、DTO、UUID、Webhook边界、Service查询/幂等与迁移转换。测试依赖使用mock，不连接生产或真实MySQL。生产构建入口存在且离线脚本未进入dist。SQL执行、真实Docker私网、Nginx和MySQL联调/导入尚未执行，需在后续获准发布时验收。
+本地 lint、typecheck、build、额外脚本eslint，以及全部73个Jest套件/813项测试通过，其中新增39项覆盖真实JwtStrategy、角色撤销、refresh token拒绝、DTO、UUID、Webhook边界、Service查询/幂等与迁移转换。测试依赖使用mock，不连接生产或真实MySQL。生产构建入口存在且离线脚本未进入dist。SQL执行、真实Docker私网、Nginx和MySQL联调/导入尚未执行，需在后续获准发布时验收。
