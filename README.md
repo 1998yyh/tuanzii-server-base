@@ -171,4 +171,4 @@ ISC
 - 可选环境项：`XIAOFEIYU_WEBHOOK_KEY`（32–256 字符），留空仅关闭推送，不影响共享后台启动。不要写进前端或日志。
 - DDL：`docs/plans/2026-10-28-xiaofeiyu-diary.sql`，遵守原有发布迁移流程。旧 SQLite 需显式离线导入，不自动执行。
 
-详见 [实现与迁移说明](docs/plans/2026-10-28-xiaofeiyu-diary-impl.md)。此次仅功能分支和 PR，未执行生产 DDL、数据导入或部署；合并 main 会触发本仓库原有自动部署。
+详见 [实现与迁移说明](docs/plans/2026-10-28-xiaofeiyu-diary-impl.md)。本次权限调整已通过 [PR #19](https://github.com/1998yyh/tuanzii-server-base/pull/19) 合并并由 [GitHub Actions](https://github.com/1998yyh/tuanzii-server-base/actions/runs/40661018421) 发布成功。线上Controller仅保留JwtAuthGuard，所有有效登录账号可访问；未登录仍需登录。本次无新增DDL、数据导入或生产日记写入。

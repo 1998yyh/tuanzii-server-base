@@ -64,3 +64,5 @@ pnpm exec ts-node scripts/import-xiaofeiyu-sqlite.ts --source /absolute/path/to/
 ## 登录用户开放范围调整（2026-10-28）
 
 用户明确选择向所有已登录账号开放，取消管理员限制，保留登录。移除日记AdminGuard和前端login/profile角色判断；列表、单篇已读、全部已读均仅要求现有有效access JWT。普通用户放行，未登录、伪造/过期/refresh令牌及账号删除仍拒绝。不改变共享日记与已读语义，不改数据库或Webhook边界，也不调整其他模块管理员权限。旧实现验证记录中的角色撤销拒绝属于调整前的行为，本次回归改为降级后仍可读、账号删除后拒绝。
+
+本次权限调整验证：本地73套件/816项Jest、lint、typecheck、build通过。PR #19合并后，[后台Actions 40661018421](https://github.com/1998yyh/tuanzii-server-base/actions/runs/40661018421) 成功，main提交aeed868。线上只读Controller元数据确认为单一JwtAuthGuard，未操作真实日记内容或已读状态。前文813项与管理员角色拒绝的记录为旧版本阶段，本段及当前权限说明为准。
