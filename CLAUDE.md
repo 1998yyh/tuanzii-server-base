@@ -16,7 +16,7 @@ src/
   auth/           # 注册/登录/刷新令牌 + JwtStrategy（依赖 UsersModule）
   users/          # User 实体（含 role）+ UsersService（无 controller，不暴露路由）
   daily-reports/  # 日报 CRUD，GET 公开，写接口需 JWT
-  xiaofeiyu-diary/ # 小肥鱼日记：管理员共享阅读/已读，本机密钥Webhook，MySQL持久化
+  xiaofeiyu-diary/ # 小肥鱼日记：登录用户共享阅读/已读，本机密钥Webhook，MySQL持久化
   agents/         # Agent 配置/会话/LangGraph tool loop/MCP/Skill/SSE
                   #   + 定时任务 + 后台任务 + 画布工具 19 个（CanvasToolsService）
                   #   + delegate_task 子代理（流式路径由执行器注入）
@@ -220,7 +220,7 @@ Agent **不再内嵌** provider / apiKey / baseUrl / model。运行时链路：
 
 ## 小肥鱼日记
 
-- 实现与显式旧数据导入见 `docs/plans/2026-10-28-xiaofeiyu-diary-impl.md`。管理员共享一本日记和已读状态；复用原 JWT，每次校验当前角色。
+- 实现与显式旧数据导入见 `docs/plans/2026-10-28-xiaofeiyu-diary-impl.md`。所有登录用户共享一本日记和已读状态；复用原JWT校验账号，不限制admin角色。
 - `/api/internal/xiaofeiyu/webhook` 仅允许回环/私网 socket 直连且无转发头，需要独立 `XIAOFEIYU_WEBHOOK_KEY`；未配置仅关闭推送。公网 Nginx 与所有 API 别名必须阻断内部路径，3000 仍只绑定宿主机回环。
 - 旧 SQLite 仅通过脚本显式导入，不参与新服务运行。生产构建限定 `src/**/*.ts`，离线脚本不进入 dist，保持 Docker 的 `dist/main` 入口。
 

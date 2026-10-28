@@ -11,21 +11,22 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { QueryXiaofeiyuDiaryDto } from './dto/xiaofeiyu-diary.dto';
-import { XiaofeiyuDiaryAdminGuard } from './xiaofeiyu-diary.guards';
 import { XiaofeiyuDiaryService } from './xiaofeiyu-diary.service';
 
 @ApiTags('小肥鱼日记')
 @ApiBearerAuth()
 @ApiResponse({ status: 401, description: '需要有效登录身份' })
-@ApiResponse({ status: 403, description: '仅管理员可访问' })
-@UseGuards(JwtAuthGuard, XiaofeiyuDiaryAdminGuard)
+@UseGuards(JwtAuthGuard)
 @Controller('xiaofeiyu')
 export class XiaofeiyuDiaryController {
   constructor(private readonly diary: XiaofeiyuDiaryService) {}
 
   @Get('entries')
   @Header('Cache-Control', 'no-store')
-  @ApiOperation({ summary: '分页阅读小肥鱼日记', description: '多管理员共享一本日记与已读状态' })
+  @ApiOperation({
+    summary: '分页阅读小肥鱼日记',
+    description: '所有登录用户共享一本日记与已读状态',
+  })
   @ApiResponse({ status: 200, description: '日记、分页信息、全局总数与未读数' })
   @ApiResponse({ status: 400, description: '分页或筛选参数无效' })
   findAll(@Query() query: QueryXiaofeiyuDiaryDto) {
