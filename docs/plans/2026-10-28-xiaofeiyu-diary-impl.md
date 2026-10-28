@@ -1,0 +1,62 @@
+# 小肥鱼日记整合共享后台
+
+## 目标与边界
+
+按用户要求将原独立 Node HTTP/SQLite 日记后台移入 tuanzi-server-base。采用 NestJS Controller/Service/DTO/Guard、TypeORM 和 MySQL，复用现有 AuthModule/JwtStrategy；不新建后台仓库、进程或对外端口。前端仍为独立 Vue 项目。本任务只提交功能分支与 PR，不合并 main、不部署、不执行生产 SQL 或导入。
+
+## 代码结构
+
+`src/xiaofeiyu-diary/` 包含 entity、DTO、管理员与内部推送守卫、Service、读写 Controller、Webhook Controller、Module。AppModule 注册模块，ConfigModule 沿用全局配置。Controller 不接触 Repository，响应显式挑选字段，DTO 使用 Swagger 和 class-validator。
+
+实体 `xiaofeiyu_diary_entries`：UUID id、title varchar(300)、content mediumtext、is_read、created_at/updated_at datetime(6)，索引 created_at/id 与 is_read/created_at。DDL 位于同日 SQL，synchronize 保持 false，原 ddl_history 自动执行流程不变。
+
+`tsconfig.build.json` 将生产构建限定 src，避免 scripts 下的离线入口将输出挪到 dist/src/main；Docker 所需 dist/main.js 已检查。通用 typecheck 仍检查脚本和测试。
+
+## 接口与身份
+
+| 方法与路径 | 说明 | 权限 |
+| --- | --- | --- |
+| GET /api/xiaofeiyu/entries | q、unread=0/1、page、limit | 现有 access JWT + admin |
+| POST /api/xiaofeiyu/entries/:uuid/read | 单篇已读，UUID Pipe | 同上 |
+| POST /api/xiaofeiyu/entries/read-all | 全部已读 | 同上 |
+| POST /api/internal/xiaofeiyu/webhook | 摘要持久化，201仅回ID | 本机直连 + 独立密钥 |
+
+列表返回 `{items,total,page,limit,totalPages,allTotal,unread,hasMore}`；total 为筛选后数量，allTotal/unread 为全局计数。条目 `{id,title,text,createdAt,read}`，按接收时间和ID倒序。搜索用参数化 LOCATE，百分号/下划线按字面量处理。分页默认30、最多100，页码从1开始，最多1000000。不提供并发插入时快照一致性。
+
+普通用户403，未登录/无效/refresh token 401，JwtStrategy 每次读取当前用户，撤销admin后立即生效。日记和已读状态按管理员共享；不新增 userId 私有本。已读操作幂等，找不到404。前端复用原 login/profile，仅 sessionStorage 保存access token，过期重新登录；旧独立Cookie会话不迁移。
+
+## Webhook
+
+`XIAOFEIYU_WEBHOOK_KEY` 为可选配置，32–256字符；不合法时仅Webhook返回503，其他模块可正常启动。优先 `X-Xiaofeiyu-Key`，兼容 query key，恒定时间比较摘要。
+
+读取原始 socket 地址，只允许回环/RFC1918/IPv6 ULA，兼容Docker桥接；拒绝存在 X-Forwarded-For、Forwarded、X-Real-IP 的请求，不信任其内容。宿主机3000继续仅绑定127.0.0.1。公网Nginx和其他应用的共享API别名应阻断内部路径，不允许清除转发头来放行推送。私网检查不能取代密钥。
+
+请求字段 title/text/content/format；text优先，content备用；默认标题“小肥鱼的碎碎念”，移除正文重复标题。拒绝空正文、无效类型、未知字段；上限256KiB、标题300字、正文100000字。HTML/Markdown均作为普通文本存储，前端不执行HTML。数据库保存失败不返回成功。暂无消息ID去重，重复投递可能新增日记。日志不写密钥/正文；查询密钥仅用于不支持请求头的旧插件，不经公网代理。
+
+## 旧 SQLite 的显式导入
+
+仅在后续获准发布时操作：先停止旧写入，保留原文件与 WAL 的一致备份，使用已备份快照；先在开发库验证 DDL/导入。旧会话不迁移。
+
+在后台仓库根目录，使用支持 node:sqlite 的Node（22.13+；建议与前端一致的24），安装开发依赖：
+
+```sh
+pnpm exec ts-node scripts/import-xiaofeiyu-sqlite.ts --source /absolute/path/to/backup.sqlite3
+```
+
+默认只读校验所有记录，不连接MySQL。只有显式加入 --apply 才加载 `.env.local` / `.env`（现有process.env优先），使用标准DB_*项连接已有MySQL表；不会建表或修改SQLite：
+
+```sh
+pnpm exec ts-node scripts/import-xiaofeiyu-sqlite.ts --source /absolute/path/to/backup.sqlite3 --apply
+```
+
+标题、正文、接收时间与已读状态保留，updatedAt初始化为接收时间。旧整数ID映射为固定命名空间UUID，事务分批插入，重复ID跳过，不覆盖已更新的已读状态。脚本针对单一旧日记库，不可用于合并多个各自从1起号的SQLite库。只输出条数和脱敏失败信息，不输出日记、凭据或源路径。原库永久保持只读；实际MySQL导入和DDL尚未执行。
+
+## 发布与回退
+
+后台main沿用自动部署，PR未经明确发布授权不要合并。先经原DDL流程发布后台，GitHub ENV_PRODUCTION加入独立推送密钥，再发布前端静态站点，最后单独配置插件直连宿主机回环Webhook。前端不再创建systemd或管理SQLite。
+
+旧服务保持停用，旧文件/撤下备份保留。回退后台代码保留新表，DDL不倒退，不自动恢复数据库。前端旧版本依赖独立服务，回退须协调API版本，不能直接重启旧服务混写数据。
+
+## 验证与限制
+
+本地 lint、typecheck、build、额外脚本eslint，以及全部73个Jest套件/813项测试通过，其中新增39项覆盖真实JwtStrategy、角色撤销、refresh token拒绝、DTO、UUID、Webhook边界、Service查询/幂等与迁移转换。测试依赖使用mock，不连接生产或真实MySQL。生产构建入口存在且离线脚本未进入dist。SQL执行、真实Docker私网、Nginx和MySQL联调/导入尚未执行，需在后续获准发布时验收。

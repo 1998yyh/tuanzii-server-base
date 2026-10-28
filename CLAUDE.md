@@ -16,6 +16,7 @@ src/
   auth/           # 注册/登录/刷新令牌 + JwtStrategy（依赖 UsersModule）
   users/          # User 实体（含 role）+ UsersService（无 controller，不暴露路由）
   daily-reports/  # 日报 CRUD，GET 公开，写接口需 JWT
+  xiaofeiyu-diary/ # 小肥鱼日记：管理员共享阅读/已读，本机密钥Webhook，MySQL持久化
   agents/         # Agent 配置/会话/LangGraph tool loop/MCP/Skill/SSE
                   #   + 定时任务 + 后台任务 + 画布工具 19 个（CanvasToolsService）
                   #   + delegate_task 子代理（流式路径由执行器注入）
@@ -38,7 +39,7 @@ src/
   common/         # guards / decorators / filters / crypto.util / ssrf.util
 ```
 
-- 功能模块在 `src/app.module.ts` 注册。当前：`LogsModule`、`AuthModule`、`UsersModule`、`DailyReportsModule`、`AgentsModule`、`McpServersModule`、`SkillsModule`、`StockSignalsModule`、`MediaModule`、`AiGenerationModule`、`CanvasModule`、`PromptsModule`、`AssetsModule`、`StockStrategiesModule`、`StockMarketModule`、`StockScreeningModule`、`StockResearchModule`、`StockAlertsModule`。新增模块必须手动加进 `imports`。
+- 功能模块在 `src/app.module.ts` 注册。当前：`LogsModule`、`AuthModule`、`UsersModule`、`DailyReportsModule`、`AgentsModule`、`McpServersModule`、`SkillsModule`、`StockSignalsModule`、`MediaModule`、`AiGenerationModule`、`CanvasModule`、`PromptsModule`、`AssetsModule`、`StockStrategiesModule`、`StockMarketModule`、`StockScreeningModule`、`StockResearchModule`、`StockAlertsModule`、`XiaofeiyuDiaryModule`。新增模块必须手动加进 `imports`。
 - **模块依赖方向（无环）**：`CanvasModule ← AiGenerationModule ← AgentsModule`。`AiGenerationModule` 用 `TypeOrmModule.forFeature([AgentConfig])` 做渠道删除引用检查，**不** import `AgentsModule`。新增依赖必须保持无环。
 - **画布平台**（2026-08 从 infinite-canvas 迁移，AGPL-3.0，见根目录 NOTICE 与 `docs/plans/2026-08-07-canvas-platform-design.md`）：画布文档 = `canvas_projects.document` JSON 列 + `version` 乐观锁。所有写路径（前端整文档保存 / Agent ops / 生成回填）走 `CanvasDocumentService.applyMutation`；`CanvasOpsService` 是上层 ops 入口。视频生成任务化（POST 立即返回 taskId，`GenerationPollerService` cron 10s 轮询回填）。**自定义调用脚本 v1 不支持**（服务端 `new Function` = RCE，决策见设计文档 §1；`ChannelModel.script` 只保留字段形状）。
 - `uploads/` 目录（仓库根）存封面图与媒体；`main.ts` 静态服务在 `/uploads/` 前缀（在 `/api` 之外，前端拼 URL 要补 origin）。静态响应带 `X-Content-Type-Options: nosniff` 与 CSP sandbox（防存储型 XSS）。媒体落盘目录是 `uploads/media`（`MediaService.MEDIA_DIR`）。
@@ -216,6 +217,12 @@ Agent **不再内嵌** provider / apiKey / baseUrl / model。运行时链路：
 - 单元测试 mock 外部依赖，不连真实数据库；策略 HTTP 单测使用替代身份守卫与 mock Repository。独立 `scripts/guanlan-smoke.cjs` 使用真实 Nest/JWT/MySQL，只接受 `guanlan_test*` 测试库，行情与模型为测试替身。测试建库脚本只接受空的 `guanlan_test_*`，不可用于生产。
 - 覆盖率收集排除 `*.module.ts` / `*.dto.ts` / `*.entity.ts` / `main.ts`——业务逻辑放 Service 层才进覆盖率。
 - 测试里 `@typescript-eslint/no-explicit-any` 关闭；生产代码是 `warn`。
+
+## 小肥鱼日记
+
+- 实现与显式旧数据导入见 `docs/plans/2026-10-28-xiaofeiyu-diary-impl.md`。管理员共享一本日记和已读状态；复用原 JWT，每次校验当前角色。
+- `/api/internal/xiaofeiyu/webhook` 仅允许回环/私网 socket 直连且无转发头，需要独立 `XIAOFEIYU_WEBHOOK_KEY`；未配置仅关闭推送。公网 Nginx 与所有 API 别名必须阻断内部路径，3000 仍只绑定宿主机回环。
+- 旧 SQLite 仅通过脚本显式导入，不参与新服务运行。生产构建限定 `src/**/*.ts`，离线脚本不进入 dist，保持 Docker 的 `dist/main` 入口。
 
 ## 文档同步
 
