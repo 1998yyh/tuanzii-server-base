@@ -179,24 +179,26 @@ describe('小肥鱼日记HTTP与真实JWT边界', () => {
     expect((await receive(body)).status).toBe(201);
     expect(diary.receive).toHaveBeenCalledWith(expect.objectContaining(body));
   });
-  it('被忽略的检查通知返回200与显式标记，普通日记仍返回201', async () => {
-    const result = { ok: true, ignored: true, reason: '分享前评论检查通知不写入日记' };
-    diary.receive.mockResolvedValueOnce(result);
-    const response = await receive({ title: '分享前评论检查', text: '隔离测试通知' });
-    expect(response.status).toBe(200);
-    expect(response.headers.get('cache-control')).toBe('no-store');
-    expect(await response.json()).toEqual(result);
-    expect((await receive({ title: '小肥鱼日记', text: '普通日记' })).status).toBe(201);
-  });
-  it('检查通知仍经过密钥和DTO校验', async () => {
-    expect(
-      (await receive({ title: '分享前评论检查', text: '隔离测试通知' }, '?key=wrong')).status,
-    ).toBe(403);
-    expect(
-      (await receive({ title: '分享前评论检查', text: '隔离测试通知', unknown: true })).status,
-    ).toBe(400);
-    expect(diary.receive).not.toHaveBeenCalled();
-  });
+  it.each(['分享前评论检查', '分享评论报备', '自主发言报备'])(
+    '评论流程通知返回200与显式标记，普通日记仍返回201：%s',
+    async (title) => {
+      const result = { ok: true, ignored: true, reason: `${title}通知不写入日记` };
+      diary.receive.mockResolvedValueOnce(result);
+      const response = await receive({ title, text: '隔离测试通知' });
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(await response.json()).toEqual(result);
+      expect((await receive({ title: '小肥鱼日记', text: '普通日记' })).status).toBe(201);
+    },
+  );
+  it.each(['分享前评论检查', '分享评论报备', '自主发言报备'])(
+    '评论流程通知仍经过密钥和DTO校验：%s',
+    async (title) => {
+      expect((await receive({ title, text: '隔离测试通知' }, '?key=wrong')).status).toBe(403);
+      expect((await receive({ title, text: '隔离测试通知', unknown: true })).status).toBe(400);
+      expect(diary.receive).not.toHaveBeenCalled();
+    },
+  );
   it('支持密钥请求头且优先于query', async () => {
     expect((await receive({ text: '正文' }, '?key=wrong', { 'X-Xiaofeiyu-Key': key })).status).toBe(
       201,
