@@ -6,9 +6,9 @@
 - 背景与目标：DSH将评论检查的暂缓通知通过日记共用Webhook投递，用户要求保留检查、仅阻止此类系统通知进入日记。
 - 具体变更及文件：日记Service在正文有效后按trim后的完整标题「分享前评论检查」过滤，不调用Repository创建/保存；Webhook Controller对忽略结果返回HTTP200及ok/ignored/reason，普通摘要保持HTTP201+ID。Service与HTTP测试覆盖不入库、空正文、相似标题/正文不误伤，以及认证/DTO和正常响应兼容；README、CLAUDE和原实现文档同步。
 - 影响范围：仅未来同标题Webhook通知的入库处理；评论检查和暂缓决策继续在DSH执行。已有日记/通知、列表计数、已读状态、其他模块和配置不变，不修改生产数据或插件。
-- 验证方式与实际结果：日记模块3套件/48项Jest、全量73套件/822项Jest、lint、typecheck、build与git diff --check均通过。测试使用Mock Repository和隔离HTTP，不连接真实数据库或推送。
+- 验证方式与实际结果：日记模块3套件/48项Jest、全量73套件/822项Jest、lint、typecheck、build与git diff --check均通过。PR #21合并后，[Actions 40830020475](https://github.com/1998yyh/tuanzii-server-base/actions/runs/40830020475)自动部署成功。先用已部署Service与禁止写入的替身Repository确认过滤，再以合成通知验收实际Webhook，返回200/ignored；该合成正文数据库计数前后均0。DSH检查仍开启，匿名日记API401、内部路径404，未读取或修改真实日记内容。
 - 兼容性与迁移：无依赖、环境、实体或DDL变更，无数据迁移；插件对HTTP200正常视为推送成功，不需改Webhook地址或密钥。固定通知标题如在插件中改名，需同步调整过滤规则。
-- 风险与回退方式：标题相同的自定义推送也会被忽略；保持精确匹配，避免误伤普通正文。撤销Service和Controller改动并通过原GitHub Actions发布即可恢复入库，不补写已忽略通知。本任务先交付分支与PR，尚未合并或部署；临时worktree在提交推送后清理，本地任务分支保留待合并。
+- 风险与回退方式：标题相同的自定义推送也会被忽略；保持精确匹配，避免误伤普通正文。撤销Service和Controller改动并通过原GitHub Actions发布即可恢复入库，不补写已忽略通知。用户要求后，PR #21已合入main的944f1c4并完成自动部署；前端仅文档PR #13同步协议。发布记录仅文档提交不重复部署；临时worktree和任务分支在本次文档合并后清理，原主目录未提交媒体改动保留。
 
 ## 2026-10-28 — 日记本取消管理员限制
 
