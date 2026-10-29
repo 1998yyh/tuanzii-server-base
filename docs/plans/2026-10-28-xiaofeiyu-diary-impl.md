@@ -19,7 +19,7 @@
 | GET /api/xiaofeiyu/entries | q、unread=0/1、page、limit | 现有有效access JWT，所有用户 |
 | POST /api/xiaofeiyu/entries/:uuid/read | 单篇已读，UUID Pipe | 同上 |
 | POST /api/xiaofeiyu/entries/read-all | 全部已读 | 同上 |
-| POST /api/internal/xiaofeiyu/webhook | 摘要持久化，201仅回ID | 本机直连 + 独立密钥 |
+| POST /api/internal/xiaofeiyu/webhook | 摘要持久化201回ID；检查通知忽略200 | 本机直连 + 独立密钥 |
 
 列表返回 `{items,total,page,limit,totalPages,allTotal,unread,hasMore}`；total 为筛选后数量，allTotal/unread 为全局计数。条目 `{id,title,text,createdAt,read}`，按接收时间和ID倒序。搜索用参数化 LOCATE，百分号/下划线按字面量处理。分页默认30、最多100，页码从1开始，最多1000000。不提供并发插入时快照一致性。
 
@@ -32,6 +32,10 @@
 读取原始 socket 地址，只允许回环/RFC1918/IPv6 ULA，兼容Docker桥接；拒绝存在 X-Forwarded-For、Forwarded、X-Real-IP 的请求，不信任其内容。宿主机3000继续仅绑定127.0.0.1。公网Nginx和其他应用的共享API别名应阻断内部路径，不允许清除转发头来放行推送。私网检查不能取代密钥。
 
 请求字段 title/text/content/format；text优先，content备用；默认标题“小肥鱼的碎碎念”，移除正文重复标题。拒绝空正文、无效类型、未知字段；上限256KiB、标题300字、正文100000字。HTML/Markdown均作为普通文本存储，前端不执行HTML。数据库保存失败不返回成功。暂无消息ID去重，重复投递可能新增日记。日志不写密钥/正文；查询密钥仅用于不支持请求头的旧插件，不经公网代理。
+
+2026-10-29补充系统通知过滤：DSH的评论检查通知通过与日记相同的notify/Webhook通道发送。标题trim后精确为「分享前评论检查」时，在私网、密钥、DTO与非空正文校验通过后，返回HTTP200及 `{ok:true,ignored:true,reason:"分享前评论检查通知不写入日记"}`，不调用Repository.create/save，也不产生ID。DSH将200视为投递成功，原评论检查、暂缓决策和本地评估记录继续保留；不修改插件或评论判断阈值。
+
+仅按该固定通知标题过滤，正文提及该词或其他部分相似标题均正常保存；普通日记保持201及 `{ok:true,id}`。已有同类通知不会自动删除，列表、搜索和未读计数不改历史数据。无环境变量、依赖、实体、DDL或前端运行代码变更。回退过滤逻辑即可恢复该类通知入库，不补写被忽略的消息。
 
 ## 旧 SQLite 的显式导入
 

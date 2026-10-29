@@ -1,5 +1,6 @@
-import { Body, Controller, Header, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Header, HttpStatus, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiHeader, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import {
   ReceiveXiaofeiyuDiaryDto,
   XiaofeiyuWebhookCredentialsDto,
@@ -21,13 +22,17 @@ export class XiaofeiyuDiaryWebhookController {
     description: '仅供服务器本机直连，公网Nginx必须阻断该路径',
   })
   @ApiResponse({ status: 201, description: '日记持久化成功，仅返回ID' })
+  @ApiResponse({ status: 200, description: '分享前评论检查通知已接收并忽略，不写入日记' })
   @ApiResponse({ status: 400, description: '正文为空、字段无效或包含未声明字段' })
   @ApiResponse({ status: 403, description: '推送密钥无效' })
   @ApiResponse({ status: 503, description: '尚未配置有效推送密钥' })
-  receive(
+  async receive(
     @Body() body: ReceiveXiaofeiyuDiaryDto,
     @Query() _credentials: XiaofeiyuWebhookCredentialsDto,
+    @Res({ passthrough: true }) response: Response,
   ) {
-    return this.diary.receive(body);
+    const result = await this.diary.receive(body);
+    if ('ignored' in result) response.status(HttpStatus.OK);
+    return result;
   }
 }

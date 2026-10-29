@@ -25,6 +25,10 @@ export class XiaofeiyuDiaryService {
     if (content.startsWith(title + '\n')) content = content.slice(title.length + 1).trimStart();
     content = content.trim();
     if (!content) throw new BadRequestException('日记正文不能为空');
+    // 插件的检查通知与日记共用推送通道；确认接收但不将系统通知写进日记。
+    if (title === '分享前评论检查') {
+      return { ok: true, ignored: true, reason: '分享前评论检查通知不写入日记' };
+    }
     const entry = await this.repository.save(
       this.repository.create({ title, content, isRead: false }),
     );

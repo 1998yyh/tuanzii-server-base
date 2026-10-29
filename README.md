@@ -168,6 +168,7 @@ ISC
 
 - 阅读：`GET /api/xiaofeiyu/entries`，写已读：`POST /api/xiaofeiyu/entries/:uuid/read`、`POST /api/xiaofeiyu/entries/read-all`。
 - 推送：`POST /api/internal/xiaofeiyu/webhook`，`X-Xiaofeiyu-Key` 请求头或兼容 query key；公网 Nginx 必须阻断此路径及 API 别名。
+- 通知过滤：去除首尾空白后的标题精确为「分享前评论检查」时，完成认证和正文校验后返回200及 `{ok:true,ignored:true,reason}`，不创建日记；普通摘要仍返回201和ID。DSH评论检查和暂缓分享继续执行，历史条目不自动删除。
 - 可选环境项：`XIAOFEIYU_WEBHOOK_KEY`（32–256 字符），留空仅关闭推送，不影响共享后台启动。不要写进前端或日志。
 - DDL：`docs/plans/2026-10-28-xiaofeiyu-diary.sql`，遵守原有发布迁移流程。旧 SQLite 需显式离线导入，不自动执行。
 
