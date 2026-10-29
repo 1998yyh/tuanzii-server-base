@@ -4,6 +4,8 @@ import { Repository } from 'typeorm';
 import { XiaofeiyuDiaryEntry } from './xiaofeiyu-diary.entity';
 import { QueryXiaofeiyuDiaryDto, ReceiveXiaofeiyuDiaryDto } from './dto/xiaofeiyu-diary.dto';
 
+const COMMENT_NOTIFICATION_TITLES = new Set(['分享前评论检查', '分享评论报备', '自主发言报备']);
+
 export interface XiaofeiyuDiaryView {
   id: string;
   title: string;
@@ -25,9 +27,9 @@ export class XiaofeiyuDiaryService {
     if (content.startsWith(title + '\n')) content = content.slice(title.length + 1).trimStart();
     content = content.trim();
     if (!content) throw new BadRequestException('日记正文不能为空');
-    // 插件的检查通知与日记共用推送通道；确认接收但不将系统通知写进日记。
-    if (title === '分享前评论检查') {
-      return { ok: true, ignored: true, reason: '分享前评论检查通知不写入日记' };
+    // 评论检查及成功后的报备都属于系统通知，与日记共用推送通道。
+    if (COMMENT_NOTIFICATION_TITLES.has(title)) {
+      return { ok: true, ignored: true, reason: `${title}通知不写入日记` };
     }
     const entry = await this.repository.save(
       this.repository.create({ title, content, isRead: false }),

@@ -66,40 +66,52 @@ describe('小肥鱼日记业务服务', () => {
     );
   });
 
-  it.each(['分享前评论检查', '  分享前评论检查\n'])(
-    '确认接收检查通知但不创建或保存日记：%s',
+  it.each(
+    ['分享前评论检查', '分享评论报备', '自主发言报备'].flatMap((title) => [title, `  ${title}\n`]),
+  )('确认接收评论流程通知但不创建或保存日记：%s', async (title) => {
+    await expect(
+      service.receive({ title, text: '暂缓 @ 分享\n隔离测试通知', format: 'markdown' }),
+    ).resolves.toEqual({
+      ok: true,
+      ignored: true,
+      reason: `${title.trim()}通知不写入日记`,
+    });
+    expect(repository.create).not.toHaveBeenCalled();
+    expect(repository.save).not.toHaveBeenCalled();
+  });
+
+  it.each(['分享前评论检查', '分享评论报备', '自主发言报备'])(
+    '普通日记提及通知或标题部分相似时照常保存：%s',
     async (title) => {
       await expect(
-        service.receive({ title, text: '暂缓 @ 分享\n隔离测试通知', format: 'markdown' }),
-      ).resolves.toEqual({
-        ok: true,
-        ignored: true,
-        reason: '分享前评论检查通知不写入日记',
-      });
-      expect(repository.create).not.toHaveBeenCalled();
-      expect(repository.save).not.toHaveBeenCalled();
+        service.receive({
+          title: `今天的${title}心得`,
+          text: `${title}只是今天的一件小事。`,
+        }),
+      ).resolves.toEqual({ ok: true, id });
+      await expect(
+        service.receive({ text: `${title}\n我想记下来的是今天的心情。` }),
+      ).resolves.toEqual({ ok: true, id });
+      expect(repository.save).toHaveBeenCalledTimes(2);
     },
   );
 
-  it('普通日记提及评论检查或标题部分相似时照常保存', async () => {
+  it('未列入过滤规则的待审回复仍按原协议保存', async () => {
     await expect(
-      service.receive({
-        title: '今天的分享前评论检查心得',
-        text: '分享前评论检查只是今天的一件小事。',
-      }),
+      service.receive({ title: '待审回复', text: '隔离测试：有回复需要审核。' }),
     ).resolves.toEqual({ ok: true, id });
-    await expect(
-      service.receive({ text: '分享前评论检查\n我想记下来的是今天的心情。' }),
-    ).resolves.toEqual({ ok: true, id });
-    expect(repository.save).toHaveBeenCalledTimes(2);
+    expect(repository.save).toHaveBeenCalledTimes(1);
   });
 
-  it('检查通知也必须提供非空正文', async () => {
-    await expect(
-      service.receive({ title: '分享前评论检查', text: '分享前评论检查\n ' }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(repository.save).not.toHaveBeenCalled();
-  });
+  it.each(['分享前评论检查', '分享评论报备', '自主发言报备'])(
+    '评论流程通知也必须提供非空正文：%s',
+    async (title) => {
+      await expect(service.receive({ title, text: `${title}\n ` })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(repository.save).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([{}, { text: '   ' }, { title: '标题', text: '标题\n  ' }])(
     '拒绝空正文%j且不写数据库',
