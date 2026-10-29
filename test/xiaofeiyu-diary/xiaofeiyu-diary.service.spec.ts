@@ -66,6 +66,41 @@ describe('小肥鱼日记业务服务', () => {
     );
   });
 
+  it.each(['分享前评论检查', '  分享前评论检查\n'])(
+    '确认接收检查通知但不创建或保存日记：%s',
+    async (title) => {
+      await expect(
+        service.receive({ title, text: '暂缓 @ 分享\n隔离测试通知', format: 'markdown' }),
+      ).resolves.toEqual({
+        ok: true,
+        ignored: true,
+        reason: '分享前评论检查通知不写入日记',
+      });
+      expect(repository.create).not.toHaveBeenCalled();
+      expect(repository.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it('普通日记提及评论检查或标题部分相似时照常保存', async () => {
+    await expect(
+      service.receive({
+        title: '今天的分享前评论检查心得',
+        text: '分享前评论检查只是今天的一件小事。',
+      }),
+    ).resolves.toEqual({ ok: true, id });
+    await expect(
+      service.receive({ text: '分享前评论检查\n我想记下来的是今天的心情。' }),
+    ).resolves.toEqual({ ok: true, id });
+    expect(repository.save).toHaveBeenCalledTimes(2);
+  });
+
+  it('检查通知也必须提供非空正文', async () => {
+    await expect(
+      service.receive({ title: '分享前评论检查', text: '分享前评论检查\n ' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(repository.save).not.toHaveBeenCalled();
+  });
+
   it.each([{}, { text: '   ' }, { title: '标题', text: '标题\n  ' }])(
     '拒绝空正文%j且不写数据库',
     async (body) => {
