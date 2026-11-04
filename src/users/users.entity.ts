@@ -32,6 +32,9 @@ export class User {
   @Column({ type: 'enum', enum: UserRole, default: UserRole.USER })
   role: UserRole;
 
+  @Column({ name: 'auth_version', type: 'int', unsigned: true, default: 0 })
+  authVersion?: number;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

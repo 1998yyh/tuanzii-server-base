@@ -1,0 +1,20 @@
+[Unit]
+Description=DSH unified browser session gateway
+After=network.target dsh-whale.service
+
+[Service]
+Type=simple
+User=dshwhale
+Group=dshwhale
+Environment=AUTH_ORIGIN=https://43.140.214.49
+Environment=DSH_UPSTREAM_AUTHORITY=43.140.214.49
+Environment=DSH_TOKEN_FILE=/run/dsh-whale-auth/launch-token
+ExecStart=/opt/dsh-whale/runtime/node/bin/node /var/projects/tuanzi-server-base/scripts/dsh-session-gateway.mjs
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

@@ -54,6 +54,7 @@ export class AuthService {
   }
 
   async register(registerDto: RegisterDto) {
+    this.assertLegacyEnabled();
     const user = await this.usersService.create(
       registerDto.email,
       registerDto.username,
@@ -64,6 +65,7 @@ export class AuthService {
   }
 
   async login(loginDto: LoginDto) {
+    this.assertLegacyEnabled();
     // 支持邮箱或用户名登录
     const user =
       (await this.usersService.findByEmail(loginDto.login)) ||
@@ -90,6 +92,7 @@ export class AuthService {
    * 使用 refresh token 刷新访问令牌
    */
   async refreshByToken(refreshToken: string) {
+    this.assertLegacyEnabled();
     let payload: TokenPayload;
     try {
       // 验证 refresh token（仅验签与过期，数据库故障不在此范围）
@@ -112,6 +115,11 @@ export class AuthService {
 
     // 生成新的 tokens
     return this.generateTokens(user.id);
+  }
+
+  private assertLegacyEnabled() {
+    if (this.configService.get('LEGACY_JWT_ENABLED') === 'false')
+      throw new UnauthorizedException('请通过统一登录入口登录');
   }
 
   private generateTokens(userId: string) {
