@@ -32,7 +32,7 @@
 
 WEB_SESSION_ENABLED 默认 false，先迁移和准备 HTTPS，再开启；AUTH_ORIGIN 固定为 `https://43.140.214.49`；AUTH_CSRF_SECRET 为独立 32 字节十六进制密钥，稳定保存在 root 管理的 `/etc/tuanzi/auth.env`，不进入 Git。
 
-流水线通过 `scripts/restart-with-auth.sh` 把允许的认证配置追加到每次下发的 `.env.production`，chmod 600，避免 GitHub 基础 ENV 覆盖服务器认证配置。文件内容不回显。密钥用服务器上的 `openssl rand -hex 32` 写入受保护文件，不在聊天或命令输出中传递。
+流水线继续下发基础 `.env.production`；Docker 守护进程将 root 私有的 `/etc/tuanzi` 只读挂载到应用。`scripts/start-with-auth.cjs` 在启动 Nest 之前只解析允许的认证字段，不执行配置文本。宿主机保持目录 0700、文件 0600，deploy 账号不能直接读取或修改该配置；认证密钥不追加到 deploy 所有的环境文件，内容不回显。密钥用服务器上的 `openssl rand -hex 32` 写入受保护文件，不在聊天或命令输出中传递。
 
 LEGACY_JWT_ENABLED 默认 true。迁移期间旧前端可继续运行；全部新前端和调用方验证后设为 false，拒绝旧 Bearer、登录、刷新和注册协议。既有注册页仅在兼容窗口通过旧注册接口创建账号，然后建立新 Cookie 会话，不读取旧 JWT；关闭兼容窗口后不再开放该旧注册入口。若仍有脚本依赖旧 JWT，必须先迁移或明确安排独立协议，不能宣称已全局撤销旧凭据。
 

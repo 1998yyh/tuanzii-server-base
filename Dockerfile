@@ -39,10 +39,11 @@ WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY package.json ./
+COPY scripts/start-with-auth.cjs ./scripts/start-with-auth.cjs
 
 # uploads/ 静态目录由 compose 挂载，这里先建出来避免权限问题
 RUN mkdir -p uploads
 
 EXPOSE 3000
 
-CMD ["node", "dist/main"]
+CMD ["node", "scripts/start-with-auth.cjs"]

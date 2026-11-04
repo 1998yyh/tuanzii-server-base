@@ -37,6 +37,8 @@ services:
       # 封面图等上传文件持久化，容器重建不丢
       - ./uploads:/app/uploads
       - /var/log/tuanzi:/var/log/tuanzi
+      # Docker 守护进程挂载，配置仅由应用读取；宿主机保持 root 0700/0600。
+      - /etc/tuanzi:/run/tuanzi-auth:ro
     logging:
       driver: json-file
       options:

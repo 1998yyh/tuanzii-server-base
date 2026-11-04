@@ -26,4 +26,5 @@ jobs:
       - run: pnpm build && pnpm typecheck && pnpm lint
       - run: pnpm exec jest --runInBand
       - run: node --test test/dsh-session-gateway.test.mjs
+      - run: node --test test/start-with-auth.test.cjs
       - run: node scripts/check-session-schema.cjs
