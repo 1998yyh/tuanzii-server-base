@@ -23,6 +23,6 @@ jobs:
       - run: corepack enable && corepack prepare pnpm@10.32.0 --activate
       - run: pnpm install --frozen-lockfile
       - run: pnpm build && pnpm typecheck && pnpm lint
-      - run: pnpm test -- --runInBand
+      - run: pnpm exec jest --runInBand
       - run: node --test test/dsh-session-gateway.test.mjs
       - run: node scripts/check-session-schema.cjs
