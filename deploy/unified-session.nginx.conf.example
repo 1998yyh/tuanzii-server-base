@@ -4,7 +4,10 @@ server {
     listen [::]:80;
     server_name 43.140.214.49;
     location ^~ /.well-known/acme-challenge/ { root /var/lib/letsencrypt; try_files $uri =404; }
-    location / { return 308 https://43.140.214.49$request_uri; }
+    # 保留静态激活脚本核对的共享 include；服务器级 return 只放行 ACME 的 HTTP 请求。
+    include /etc/nginx/snippets/xiaofeiyu.locations.inc;
+    include /etc/nginx/conf.d/xunshi-locations.inc;
+    if ($uri !~ "^/\.well-known/acme-challenge/") { return 308 https://43.140.214.49$request_uri; }
 }
 server {
     listen 443 ssl;
