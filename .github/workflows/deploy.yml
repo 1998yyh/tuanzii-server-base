@@ -65,7 +65,7 @@ jobs:
       - name: 服务器端重建并重启 app
         run: |
           ssh -o BatchMode=yes ${{ vars.SERVER_USER }}@${{ vars.SERVER_HOST }} \
-            "export PATH=/usr/local/bin:\$PATH; cd ${{ vars.REMOTE_DIR }} && docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build app"
+            "export PATH=/usr/local/bin:\$PATH; cd ${{ vars.REMOTE_DIR }} && bash scripts/restart-with-auth.sh"
 
       - name: 健康检查
         run: |

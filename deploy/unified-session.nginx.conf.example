@@ -1,0 +1,63 @@
+# 审核后安装到现有站点配置。先备份 80 端口配置；只保留一个对应的 default server。
+server {
+    listen 80;
+    listen [::]:80;
+    server_name 43.140.214.49;
+    location ^~ /.well-known/acme-challenge/ { root /var/lib/letsencrypt; try_files $uri =404; }
+    location / { return 308 https://43.140.214.49$request_uri; }
+}
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name 43.140.214.49;
+    ssl_certificate /etc/letsencrypt/live/43.140.214.49/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/43.140.214.49/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    root /var/www/personal-homepage;
+    index index.html;
+    charset utf-8;
+    # 这些现有 include 保留内部 Webhook 的所有别名阻断、静态目录和长扫描配置。
+    include /etc/nginx/snippets/xiaofeiyu.locations.inc;
+    include /etc/nginx/conf.d/xunshi-locations.inc;
+    location /api/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 300s;
+        proxy_buffering off;
+        client_max_body_size 5m;
+    }
+    location ^~ /uploads/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+    location = /admin { return 308 /admin/; }
+    location ^~ /admin/ {
+        # 正式发布前核对实际目录；单独发布管理后台的静态构建产物。
+        # /var/www/admin 指向管理后台发布的 dist 目录。
+        root /var/www;
+        try_files $uri $uri/ /admin/index.html;
+        add_header Cache-Control no-cache always;
+    }
+    location = /dsh { return 308 /dsh/; }
+    location ^~ /dsh/ {
+        # 必须替换旧的直通 3080 配置，所有方法与升级连接经过会话网关。
+        proxy_pass http://127.0.0.1:3081/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 2h;
+        proxy_buffering off;
+        client_max_body_size 50m;
+        access_log off;
+    }
+    location / { try_files $uri $uri/ /index.html; add_header Cache-Control no-cache always; }
+    location ~ /\. { deny all; }
+}
