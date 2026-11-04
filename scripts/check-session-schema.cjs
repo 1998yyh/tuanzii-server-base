@@ -21,6 +21,7 @@ const { BrowserSessionsService } = require('../dist/auth/browser-sessions.servic
   };
   const sql = await mysql.createConnection({ ...options, multipleStatements: true });
   let database;
+  const deadline = setTimeout(() => { console.error("MySQL 隔离检查超时"); process.exit(1); }, 60_000);
   try {
     await sql.query(
       `CREATE TABLE users (id VARCHAR(36) PRIMARY KEY,email VARCHAR(100) NOT NULL UNIQUE,username VARCHAR(50) NOT NULL UNIQUE,password VARCHAR(255) NOT NULL,role ENUM('user','admin') NOT NULL DEFAULT 'user',created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
@@ -32,13 +33,16 @@ const { BrowserSessionsService } = require('../dist/auth/browser-sessions.servic
       await bcrypt.hash('integration-only', 10),
     ]);
     await sql.query(await readFile('docs/plans/2026-11-04-browser-sessions.sql', 'utf8'));
+    console.log('MySQL DDL applied to isolated test database.');
     database = new DataSource({
-      ...options,
+      host: options.host, port: options.port, username: options.user,
+      password: options.password, database: options.database,
       type: 'mysql',
       entities: [User, BrowserSession, UserAppGrant],
       synchronize: false,
     });
     await database.initialize();
+    console.log("ORM connection initialized.");
     const service = new BrowserSessionsService(
       database.getRepository(BrowserSession),
       database.getRepository(UserAppGrant),
@@ -95,8 +99,9 @@ const { BrowserSessionsService } = require('../dist/auth/browser-sessions.servic
       'MySQL migration, ORM mapping, tuanzi-only grant, CSRF, hidden token hash and global revocation passed.',
     );
   } finally {
-    await database?.destroy();
-    await sql.end();
+    clearTimeout(deadline);
+    try { if (database?.isInitialized) await database.destroy(); }
+    finally { await sql.end(); }
   }
 })().catch((error) => {
   console.error(error.message);
