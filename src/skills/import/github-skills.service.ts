@@ -19,6 +19,41 @@ export class GithubSkillsService {
   private readonly cache = new Map<string, { until: number; value: unknown }>();
   private readonly pending = new Map<string, Promise<unknown>>();
   private readonly inFlight = new Set<string>();
+  private rawUnavailableUntil = 0;
+
+  private async downloadFile(
+    repository: string,
+    revision: string,
+    file: TreeEntry,
+    signal: AbortSignal,
+  ): Promise<Buffer> {
+    if (Date.now() >= this.rawUnavailableUntil) {
+      const url = `https://raw.githubusercontent.com/${repository}/${revision}/${file.path.split('/').map(encodeURIComponent).join('/')}`;
+      try {
+        // 原始文件域名在部分部署网络不可达，预留总预算给官方 API 备用通道。
+        return await this.bytes(
+          url,
+          AbortSignal.any([signal, AbortSignal.timeout(8000)]),
+          MAX_FILE,
+          'application/octet-stream',
+        );
+      } catch (error) {
+        const networkFailure =
+          error instanceof TypeError ||
+          (error instanceof DOMException && ['TimeoutError', 'AbortError'].includes(error.name));
+        // 不重试取消、HTTP错误、SSRF拒绝或大小限制，避免把校验失败伪装成网络故障。
+        if (signal.aborted || !networkFailure) throw error;
+        this.rawUnavailableUntil = Date.now() + 300_000;
+      }
+    }
+    // 仍只访问 GitHub，按树里的不可变 blob SHA 取原始字节；后续继续核对大小和哈希。
+    return this.bytes(
+      `https://api.github.com/repos/${repository}/git/blobs/${file.sha}`,
+      signal,
+      MAX_FILE,
+      'application/vnd.github.raw+json',
+    );
+  }
   private async request<T>(path: string, signal: AbortSignal, max = 5 * 1024 * 1024): Promise<T> {
     const cached = this.cache.get(path);
     if (cached && cached.until > Date.now()) return cached.value as T;
@@ -186,8 +221,7 @@ export class GithubSkillsService {
     for (let offset = 0; offset < files.length; offset += 4) {
       const loaded = await Promise.all(
         files.slice(offset, offset + 4).map(async (file) => {
-          const rawUrl = `https://raw.githubusercontent.com/${source.repository}/${commit.sha}/${file.path.split('/').map(encodeURIComponent).join('/')}`;
-          const bytes = await this.bytes(rawUrl, signal, MAX_FILE, 'application/octet-stream');
+          const bytes = await this.downloadFile(source.repository, commit.sha, file, signal);
           const sha = createHash('sha1')
             .update(`blob ${bytes.length}\0`)
             .update(bytes)

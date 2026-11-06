@@ -238,3 +238,5 @@ Agent **不再内嵌** provider / apiKey / baseUrl / model。运行时链路：
 **维护者**: 团子项目组
 
 - GitHub/市场技能包导入与发布说明见 `docs/plans/2026-11-05-skill-package-import-design.md`，DDL 为同日 `skill-package-import.sql`；source/package_files 是可空字段，旧数据不迁移，Skill 统一在当前 Agent 会话中按需读取和执行，工具权限仅来自宿主 Agent。调用机制见 `docs/plans/2026-11-06-current-agent-skills-design.md`。
+
+- 技能导入发布与 GitHub 原始文件域名网络失败的官方 API 备用通道见 `docs/plans/2026-11-06-skill-import-release.md`；保持原始字节大小与 blob SHA 校验，不绕过取消、HTTP 错误或 SSRF 拒绝。
