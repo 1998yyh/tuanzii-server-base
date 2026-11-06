@@ -22,12 +22,8 @@ export function prepareNativeWebSearch(
   const localTools = tools.filter((tool) => !(tool instanceof WebSearchTool));
   const hostname = new URL(channel.baseUrl).hostname;
   const isHost = (domain: string) => hostname === domain || hostname.endsWith(`.${domain}`);
-  // DeepSeek 的当前兼容性表明确标注忽略内置搜索，不能把普通回答当作搜索成功。
-  if (isHost('deepseek.com') || /(^|[/:])deepseek(?:-|$)/i.test(channel.model)) {
-    throw new BadRequestException(
-      '当前 DeepSeek API 不支持此内置联网搜索，请关闭 web_search 或选择支持内置搜索的渠道',
-    );
-  }
+  // 按渠道协议声明搜索工具，不按供应商域名或模型名称提前禁止搜索。
+  // 具体模型是否接受、是否调用搜索由上游决定；拒绝时保留真实错误。
   if (channel.apiFormat === ApiFormat.ANTHROPIC) {
     return {
       kind: 'anthropic',

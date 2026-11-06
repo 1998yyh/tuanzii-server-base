@@ -12,17 +12,18 @@ import {
 } from 'typeorm';
 import { User } from '../users/users.entity';
 import { McpServer } from '../mcp-servers/mcp-server.entity';
+import type { SkillPackageFile, SkillSource } from './import/skill-package.types';
 
 /**
- * Skill：配置级工具单元。底层是带 systemPrompt + 工具集的临时子 Agent，
- * 主 Agent 调用时借用其 provider/model/apiKey 执行（见 SkillToolFactory）。
+ * Skill：当前 Agent 按需读取的工作流说明与可选资源包。
+ * 不另起子 Agent，不改变宿主工具权限；旧工具配置字段仅保留数据兼容。
  */
 @Entity('skills')
 export class Skill {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  /** 工具名（LLM 调用时的 tool name，snake_case），全局唯一 */
+  /** 技能标识（用于 $名称 和目录查找，snake_case），全局唯一 */
   @Index({ unique: true })
   @Column({ length: 100 })
   name: string;
@@ -31,22 +32,28 @@ export class Skill {
   @Column({ type: 'varchar', length: 500 })
   description: string;
 
-  /** 子 Agent 的执行指令（system prompt） */
+  /** 技能正文（兼容旧列名；读取后作为工作流资料） */
   @Column({ name: 'system_prompt', type: 'text' })
   systemPrompt: string;
+
+  @Column({ type: 'json', nullable: true })
+  source?: SkillSource | null;
+
+  @Column({ name: 'package_files', type: 'json', nullable: true, select: false })
+  packageFiles?: SkillPackageFile[] | null;
 
   /** 入参 JSON Schema；为空时工具只接收单个 input 字符串 */
   @Column({ name: 'input_schema', type: 'json', nullable: true })
   inputSchema: Record<string, unknown> | null;
 
-  /** 子 Agent 可用的内置工具名列表 */
+  /** 旧版工具配置，保留存储兼容，技能执行不读取 */
   @Column({ name: 'enabled_tools', type: 'json', nullable: true })
   enabledTools: string[] | null;
 
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 
-  /** 子 Agent 可用的 MCP Server（skill_mcp_servers 关联表） */
+  /** 旧版 MCP 关联，保留存储兼容，技能执行不读取 */
   @ManyToMany(() => McpServer)
   @JoinTable({
     name: 'skill_mcp_servers',
@@ -70,4 +77,6 @@ export class Skill {
 }
 
 /** API 响应形状：mcpServers 关系展开为 id 列表 */
-export type SkillView = Omit<Skill, 'creator' | 'mcpServers'> & { mcpServerIds: string[] };
+export type SkillView = Omit<Skill, 'creator' | 'mcpServers' | 'packageFiles'> & {
+  mcpServerIds: string[];
+};

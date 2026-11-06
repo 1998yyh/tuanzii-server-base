@@ -20,7 +20,6 @@ import { ToolRegistryService } from './tools/tool-registry.service';
 import { DelegateToolFactory } from './tools/delegate-tool.factory';
 import { McpServersService } from '../mcp-servers/mcp-servers.service';
 import { SkillToolFactory } from '../skills/skill-tool.factory';
-import { Skill } from '../skills/skill.entity';
 import { TypeORMCheckpointer } from './checkpointers/typeorm.checkpointer';
 import { AiChannelsService, ResolvedChatModel } from '../ai-generation/ai-channels.service';
 import { ApiFormat } from '../ai-generation/entities/ai-channel.entity';
@@ -70,11 +69,11 @@ const SUB_AGENT_META_KEY = 'subAgentRun';
 export interface BatchRunOptions {
   /** 提供则走 checkpointer 持久化（thread_id = 该值）；缺省为一次性无历史执行 */
   threadId?: string;
-  /** Skill 子 Agent 的执行指令（替代 agentConfig.systemPrompt） */
+  /** 批量任务的执行指令（替代 agentConfig.systemPrompt） */
   overrideSystemPrompt?: string | null;
-  /** Skill 子 Agent 的工具集（替代正常工具加载） */
+  /** 批量任务的工具集（替代正常工具加载） */
   overrideTools?: StructuredToolInterface[];
-  /** 防递归：为 true 时不注入 Skill 工具（Task 4 生效） */
+  /** 防递归：兼容旧调用方，为 true 时不注入技能读取工具 */
   isSkillExecution?: boolean;
   /** 中止信号（如后台任务超时）：透传给 LangGraph 执行 */
   signal?: AbortSignal;
@@ -292,7 +291,7 @@ export class AgentExecutorService {
    *
    * 两种形态：
    * - 带 threadId 且无覆盖项：等价 run（走 checkpoint，第三期定时任务用）
-   * - 其余：一次性无历史执行（Skill 子 Agent 用），不产生 checkpoint 数据
+   * - 其余：一次性无历史执行（后台任务等），不产生 checkpoint 数据
    */
   async runBatch(
     agentConfig: AgentConfig,
@@ -345,7 +344,7 @@ export class AgentExecutorService {
 
   /**
    * 汇总三层工具：内置工具 + MCP 工具 + Skill 工具。
-   * isSkillExecution=true 时为 Skill 子 Agent 执行，跳过 Skill 注入（防递归）。
+   * isSkillExecution=true 时为受限子任务，跳过技能读取工具。
    * subHook 仅流式路径（runStream）提供：delegate_task 按运行注入（registry 查不到
    * 这个 executor 专属工具），子代理事件经 subHook 包装为 sub_event 透出；
    * 批量路径无 subHook → 不注入（子代理在无透出能力的环境里会静默长跑）。
@@ -371,10 +370,7 @@ export class AgentExecutorService {
         }),
       );
     }
-    const skillTools = await this.skillToolFactory.createToolsForAgent(config, {
-      runBatch: (userMessage, options) => this.runBatch(config, userMessage, options),
-      buildSubTools: (skill) => this.buildSkillSubTools(config, skill),
-    });
+    const skillTools = await this.skillToolFactory.createToolsForAgent(config);
     // Skill 名与内置/MCP 工具同名时跳过：bindTools 收到重名工具会让模型 API 直接报错
     const existingNames = new Set(tools.map((t) => t.name));
     const dedupedSkillTools = skillTools.filter((t) => {
@@ -385,20 +381,6 @@ export class AgentExecutorService {
       return true;
     });
     return [...tools, ...dedupedSkillTools];
-  }
-
-  /** Skill 子 Agent 的工具集：Skill.enabledTools（内置）+ Skill.mcpServers（MCP，过滤停用并解密） */
-  private async buildSkillSubTools(
-    config: AgentConfig,
-    skill: Skill,
-  ): Promise<StructuredToolInterface[]> {
-    const mcpRuntime = (skill.mcpServers ?? [])
-      .filter((s) => s.isActive)
-      .map((s) => this.mcpServersService.toRuntimeConfig(s));
-    return this.toolRegistry.getToolsForAgent(
-      { ...config, enabledTools: skill.enabledTools ?? [] },
-      mcpRuntime,
-    );
   }
 
   private async buildGraph(

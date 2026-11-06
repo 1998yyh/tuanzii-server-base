@@ -9,9 +9,9 @@ Agent 和 Skill 继续通过 `enabledTools: ["web_search"]` 开启联网搜索�
 | Anthropic 格式               | Messages API                 | `{ "type": "web_search_20250305", "name": "web_search" }`               |
 | OpenAI 格式                  | 启用搜索时使用 Responses API | `{ "type": "web_search" }`                                              |
 | Kimi / Moonshot，OpenAI 格式 | Chat Completions             | `{ "type": "builtin_function", "function": { "name": "$web_search" } }` |
-| DeepSeek                     | 开启内置搜索时返回明确错误   | 当前官方兼容性指南标注内置搜索会被忽略                                  |
+| DeepSeek                     | 按所选渠道协议发送搜索请求   | Anthropic 使用 Messages 搜索声明；OpenAI 使用 Responses 搜索声明        |
 
-Kimi 根据官方域名（moonshot.cn、moonshot.ai、kimi.com）或模型名称中的 kimi / moonshot 前缀识别，因此也能用于保留模型名称的代理网关。DeepSeek 同样根据官方域名或模型名前缀识别。其他 OpenAI 格式网关开启搜索时须支持 Responses API 和对应内置工具；接口拒绝时直接传播错误，不静默退回无搜索回答。
+Kimi 根据官方域名（moonshot.cn、moonshot.ai、kimi.com）或模型名称中的 kimi / moonshot 前缀识别，因此也能用于保留模型名称的代理网关。不按 DeepSeek 等供应商域名或模型名称提前禁止搜索。其他 OpenAI 格式网关开启搜索时须支持 Responses API 和对应内置工具；接口拒绝时直接传播错误，不静默退回无搜索回答。
 
 ## 实现
 
@@ -24,7 +24,7 @@ Kimi 根据官方域名（moonshot.cn、moonshot.ai、kimi.com）或模型名称
 
 ## 验证
 
-`test/agents/native-web-search.spec.ts` 使用真实 LangChain 序列化、LangGraph 和 MemorySaver，仅 mock HTTP 边界。覆盖实际路径、请求声明、Kimi 参数回传和普通工具共存、Skill 搜索隔离、Claude pause/resume、流式引用、子代理及不支持的接口错误。测试不访问真实供应商，不验证某个账号/代理网关的搜索开通状态。
+`test/agents/native-web-search.spec.ts` 使用真实 LangChain 序列化、LangGraph 和 MemorySaver，仅 mock HTTP 边界。覆盖实际路径、请求声明、Kimi 参数回传和普通工具共存、Skill 搜索隔离、Claude pause/resume、流式引用、子代理、DeepSeek 直连/代理网关和不支持的接口错误。测试不访问真实供应商，不验证某个账号/代理网关的搜索开通状态。
 
 ```sh
 npm test -- --runInBand test/agents/native-web-search.spec.ts test/agents/agent-executor.service.spec.ts test/agents/tools/tool-registry.service.spec.ts
@@ -40,3 +40,9 @@ npm run build
 - [DeepSeek Responses API 兼容性](https://api-docs.deepseek.com/zh-cn/guides/responses_api/)
 
 本说明替代早期 Agent 设计中关于 Tavily 的实现描述。
+
+## 2026-11-05 更新
+
+移除 DeepSeek 的域名/模型名称拒绝规则。官方现有 [Anthropic 兼容文档](https://api-docs.deepseek.com/guides/anthropic_api/) 和 [Search / Fetch 文档](https://api-docs.deepseek.com/guides/search/) 已提供搜索能力说明；渠道启用 `web_search` 后按配置协议声明搜索工具，由上游决定具体模型的支持与调用情况。不自动更换模型、关闭搜索或引入额外搜索服务；真实上游拒绝继续透出。声明工具并不保证模型每次执行搜索。
+
+线上当前 Flash 渠道及测试 Agent 的调用标识从 `deepseek-v4.1-flash` 校正为官方 `deepseek-flash`（仍为 V4.1 Flash，见 [官方更新日志](https://api-docs.deepseek.com/updates/)）。这是渠道目录与引用配置的事务更新，不在执行器中添加别名转换，也不改变其他渠道/Agent。

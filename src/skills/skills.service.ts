@@ -13,6 +13,8 @@ import { User, UserRole } from '../users/users.entity';
 import { Skill, SkillView } from './skill.entity';
 import { CreateSkillDto } from './dto/create-skill.dto';
 import { UpdateSkillDto } from './dto/update-skill.dto';
+import type { SkillPackageFile, SkillSource } from './import/skill-package.types';
+import { createHash } from 'node:crypto';
 import { McpServersService } from '../mcp-servers/mcp-servers.service';
 import { ALL_BUILTIN_TOOL_NAMES, CANVAS_TOOL_NAMES } from '../agents/tools/tool-names';
 
@@ -77,7 +79,11 @@ export class SkillsService implements OnApplicationBootstrap {
     this.logger.log('已种子化内置 Skill「画布助手」');
   }
 
-  async create(user: CurrentUser, dto: CreateSkillDto): Promise<SkillView> {
+  async create(
+    user: CurrentUser,
+    dto: CreateSkillDto,
+    bundle?: { source: SkillSource; files: SkillPackageFile[] },
+  ): Promise<SkillView> {
     await this.assertNameAvailable(dto.name);
     this.assertBuiltinTools(dto.enabledTools);
     const mcpServers = dto.mcpServerIds?.length
@@ -88,6 +94,8 @@ export class SkillsService implements OnApplicationBootstrap {
     try {
       saved = await this.skillRepo.save(
         this.skillRepo.create({
+          source: bundle?.source ?? null,
+          packageFiles: bundle?.files ?? null,
           name: dto.name,
           description: dto.description,
           systemPrompt: dto.systemPrompt,
@@ -108,9 +116,9 @@ export class SkillsService implements OnApplicationBootstrap {
     return this.toView(await this.reloadWithRelations(saved.id));
   }
 
-  async findAllActive(): Promise<{ items: SkillView[]; total: number }> {
+  async findAllActive(includeInactive = false): Promise<{ items: SkillView[]; total: number }> {
     const [items, total] = await this.skillRepo.findAndCount({
-      where: { isActive: true },
+      where: includeInactive ? {} : { isActive: true },
       order: { createdAt: 'DESC' },
     });
     // 性能：不再加载 mcpServers 完整实体（含 env/headers 密文列），只回查关联 id
@@ -137,7 +145,34 @@ export class SkillsService implements OnApplicationBootstrap {
 
     if (dto.name !== undefined) skill.name = dto.name;
     if (dto.description !== undefined) skill.description = dto.description;
-    if (dto.systemPrompt !== undefined) skill.systemPrompt = dto.systemPrompt;
+    if (dto.systemPrompt !== undefined) {
+      if (skill.source && dto.systemPrompt !== skill.systemPrompt) {
+        const bundle = await this.package(id);
+        const bytes = Buffer.from(dto.systemPrompt, 'utf8');
+        if (bytes.length > 60 * 1024) throw new BadRequestException('技能内容不能超过 60 KB');
+        const old = bundle.files.find((file) => file.path === 'SKILL.md');
+        skill.packageFiles = bundle.files.map((file) =>
+          file.path === 'SKILL.md'
+            ? {
+                ...file,
+                content: dto.systemPrompt!,
+                encoding: 'utf8',
+                size: bytes.length,
+                sha: createHash('sha1')
+                  .update(`blob ${bytes.length}\0`)
+                  .update(bytes)
+                  .digest('hex'),
+              }
+            : file,
+        );
+        skill.source = {
+          ...skill.source,
+          modified: true,
+          totalBytes: skill.source.totalBytes - (old?.size ?? 0) + bytes.length,
+        };
+      }
+      skill.systemPrompt = dto.systemPrompt;
+    }
     if (dto.inputSchema !== undefined) skill.inputSchema = dto.inputSchema ?? null;
     if (dto.enabledTools !== undefined) skill.enabledTools = dto.enabledTools;
     if (dto.isActive !== undefined) skill.isActive = dto.isActive;
@@ -159,6 +194,16 @@ export class SkillsService implements OnApplicationBootstrap {
     return this.toView(await this.reloadWithRelations(id));
   }
 
+  async package(id: string) {
+    const item = await this.skillRepo
+      .createQueryBuilder('s')
+      .addSelect('s.packageFiles')
+      .where('s.id = :id', { id })
+      .getOne();
+    if (!item) throw new NotFoundException('Skill 不存在');
+    return { source: item.source ?? null, files: item.packageFiles ?? [] };
+  }
+
   /** 硬删除；agent_config_skills / skill_mcp_servers 关联由外键 CASCADE 清理 */
   async remove(user: CurrentUser, id: string): Promise<void> {
     const skill = await this.findOrFail(id);
@@ -170,8 +215,8 @@ export class SkillsService implements OnApplicationBootstrap {
   findByAgentConfig(agentConfigId: string): Promise<Skill[]> {
     return this.skillRepo
       .createQueryBuilder('s')
+      .addSelect('s.packageFiles')
       .innerJoin('agent_config_skills', 'j', 'j.skill_id = s.id')
-      .leftJoinAndSelect('s.mcpServers', 'm')
       .where('j.agent_config_id = :agentConfigId', { agentConfigId })
       .andWhere('s.isActive = true')
       .getMany();
@@ -207,6 +252,7 @@ export class SkillsService implements OnApplicationBootstrap {
   toView(skill: Skill): SkillView {
     return {
       id: skill.id,
+      source: skill.source ?? null,
       name: skill.name,
       description: skill.description,
       systemPrompt: skill.systemPrompt,

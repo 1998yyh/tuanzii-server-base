@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Delete,
   Get,
   HttpCode,
@@ -12,7 +13,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { User } from '../users/users.entity';
+import { User, UserRole } from '../users/users.entity';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { SkillsService } from './skills.service';
@@ -36,6 +37,15 @@ export class SkillsController {
     return this.skillsService.findAllActive();
   }
 
+  @Get('management')
+  @ApiOperation({ summary: '管理全部 Skill（含停用）', description: '仅管理员，返回现有脱敏视图' })
+  @ApiResponse({ status: 200, description: '获取成功' })
+  @ApiResponse({ status: 403, description: '仅管理员可访问' })
+  async management(@CurrentUser() user: Omit<User, 'password'>) {
+    if (user.role !== UserRole.ADMIN) throw new ForbiddenException('仅管理员可访问管理列表');
+    return this.skillsService.findAllActive(true);
+  }
+
   @Post()
   @ApiOperation({ summary: '创建 Skill', description: 'name 全局唯一，snake_case' })
   @ApiResponse({ status: 201, description: '创建成功' })
@@ -43,6 +53,12 @@ export class SkillsController {
   @ApiResponse({ status: 409, description: '名称已存在' })
   async create(@CurrentUser() user: Omit<User, 'password'>, @Body() dto: CreateSkillDto) {
     return this.skillsService.create(user, dto);
+  }
+
+  @Get(':id/package')
+  @ApiOperation({ summary: '查看技能导入来源与文件快照' })
+  async package(@Param('id', ParseUUIDPipe) id: string) {
+    return this.skillsService.package(id);
   }
 
   @Patch(':id')

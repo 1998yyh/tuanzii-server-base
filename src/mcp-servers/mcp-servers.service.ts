@@ -90,9 +90,13 @@ export class McpServersService {
 
   async findAllActive(
     query: QueryMcpServerDto,
+    includeInactive = false,
   ): Promise<{ items: McpServerView[]; total: number }> {
     const [items, total] = await this.mcpServerRepo.findAndCount({
-      where: query.type ? { isActive: true, type: query.type } : { isActive: true },
+      where: {
+        ...(includeInactive ? {} : { isActive: true }),
+        ...(query.type ? { type: query.type } : {}),
+      },
       order: { createdAt: 'DESC' },
     });
     return { items: items.map((s) => this.toView(s)), total };

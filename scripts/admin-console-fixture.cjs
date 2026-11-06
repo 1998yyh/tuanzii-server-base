@@ -118,10 +118,14 @@ const { LogStore } = require(root + '/logs/log-store.js');
     config,
   );
 
+  const ai = process.env.FIXTURE_AI === 'true'
+    ? require('./ai-admin-fixture-data.cjs')(root)
+    : { controllers: [], providers: [] };
   const module = await Test.createTestingModule({
     imports: [PassportModule, JwtModule.register({ secret })],
-    controllers: [AuthController, BrowserSessionsController, LogsController],
+    controllers: [AuthController, BrowserSessionsController, LogsController, ...ai.controllers],
     providers: [
+      ...ai.providers,
       AuthService,
       BrowserSessionGuard,
       { provide: BrowserSessionsService, useValue: sessions },

@@ -262,11 +262,71 @@ describe('供应商内置联网搜索', () => {
     expect(requests[0].body.tools).toEqual([{ type: 'web_search' }]);
   });
 
-  it('DeepSeek 不静默忽略搜索开关，调用模型前明确报出不支持', async () => {
-    resolved.baseUrl = 'https://api.deepseek.com';
-    resolved.model = 'deepseek-chat';
-    await expect(service.run(agent, 'deepseek', '搜索')).rejects.toThrow('不支持');
-    expect(requests).toHaveLength(0);
+  it.each([
+    {
+      apiFormat: ApiFormat.ANTHROPIC,
+      baseUrl: 'https://api.deepseek.com/anthropic',
+      model: 'deepseek-v4.1-flash',
+    },
+    {
+      apiFormat: ApiFormat.ANTHROPIC,
+      baseUrl: 'https://gateway.example.com/anthropic',
+      model: 'deepseek-v4.1-flash',
+    },
+    {
+      apiFormat: ApiFormat.OPENAI,
+      baseUrl: 'https://api.deepseek.com/v1',
+      model: 'deepseek-v4-pro',
+    },
+    {
+      apiFormat: ApiFormat.OPENAI,
+      baseUrl: 'https://gateway.example.com/v1',
+      model: 'deepseek-v4.1-flash',
+    },
+  ])('DeepSeek $apiFormat / $baseUrl 不按域名或模型名拦截，按协议请求搜索', async (channel) => {
+    Object.assign(resolved, channel);
+    replies.push(
+      channel.apiFormat === ApiFormat.OPENAI
+        ? response()
+        : json({
+            id: 'msg-deepseek',
+            type: 'message',
+            role: 'assistant',
+            model: resolved.model,
+            stop_reason: 'end_turn',
+            usage: { input_tokens: 10, output_tokens: 5 },
+            content: [
+              {
+                type: 'server_tool_use',
+                id: 'ds-search-1',
+                name: 'web_search',
+                input: { query: '最新消息' },
+              },
+              { type: 'web_search_tool_result', tool_use_id: 'ds-search-1', content: [] },
+              { type: 'text', text: '搜索完成' },
+            ],
+          }),
+    );
+    await service.run(agent, 'deepseek', '搜索');
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe(
+      channel.baseUrl + (channel.apiFormat === ApiFormat.ANTHROPIC ? '/v1/messages' : '/responses'),
+    );
+    expect(requests[0].body.model).toBe(channel.model);
+    expect(requests[0].body.tools).toEqual(
+      channel.apiFormat === ApiFormat.ANTHROPIC
+        ? [{ type: 'web_search_20250305', name: 'web_search' }]
+        : [{ type: 'web_search' }],
+    );
+  });
+
+  it('DeepSeek 未开启搜索时不改变普通对话协议', async () => {
+    resolved.baseUrl = 'https://api.deepseek.com/v1';
+    resolved.model = 'deepseek-v4.1-flash';
+    replies.push(completion({ content: '你好' }));
+    await service.run({ ...agent, enabledTools: [] }, 'deepseek-off', '你好');
+    expect(requests[0].url).toBe('https://api.deepseek.com/v1/chat/completions');
+    expect(requests[0].body.tools).toBeUndefined();
   });
 
   it('Claude 的 pause_turn 会继续请求并携带原始搜索上下文', async () => {
@@ -335,10 +395,12 @@ describe('供应商内置联网搜索', () => {
     expect(requests).toHaveLength(1);
   });
 
-  it('Claude 流式回答的引用会出现在 message_end，供应商上下文不会变成回答文字', async () => {
+  it.each([
+    { baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-6' },
+    { baseUrl: 'https://api.deepseek.com/anthropic', model: 'deepseek-v4.1-flash' },
+  ])('$model 流式搜索保留引用和供应商上下文', async (channel) => {
     resolved.apiFormat = ApiFormat.ANTHROPIC;
-    resolved.baseUrl = 'https://api.anthropic.com';
-    resolved.model = 'claude-sonnet-4-6';
+    Object.assign(resolved, channel);
     const events = [
       {
         type: 'message_start',
@@ -413,6 +475,8 @@ describe('供应商内置联网搜索', () => {
     const output = [];
     for await (const event of service.runStream(agent, 'stream', '搜索')) output.push(event);
     expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe(channel.baseUrl + '/v1/messages');
+    expect(requests[0].body.tools).toEqual([{ type: 'web_search_20250305', name: 'web_search' }]);
     expect(requests[0].body.stream).toBe(true);
     expect(output).toContainEqual({ type: 'text_delta', data: { text: '找到公告。' } });
     expect(output.find((event) => event.type === 'message_end')?.data).toMatchObject({
@@ -495,9 +559,13 @@ describe('供应商内置联网搜索', () => {
     expect(requests[0].url).toBe('https://api.openai.com/v1/responses');
     expect(requests[0].body.tools).toEqual([{ type: 'web_search' }]);
 
+    resolved.baseUrl = 'https://api.deepseek.com/v1';
+    resolved.model = 'deepseek-v4-pro';
     replies.push(streamReply());
     const onEvent = jest.fn();
     const subAnswer = await service.runSubAgent(agent, '搜索', { onEvent });
+    expect(requests.at(-1)?.url).toBe('https://api.deepseek.com/v1/responses');
+    expect(requests.at(-1)?.body.tools).toEqual([{ type: 'web_search' }]);
     expect(subAnswer).toContain('[公告](https://example.com/news)');
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'message_end' }));
   });

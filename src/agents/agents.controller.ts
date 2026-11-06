@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Delete,
   Get,
   HttpCode,
@@ -14,7 +15,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { User } from '../users/users.entity';
+import { User, UserRole } from '../users/users.entity';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AgentsService } from './agents.service';
@@ -48,6 +49,18 @@ export class AgentsController {
   @ApiResponse({ status: 200, description: '获取成功' })
   async findAll(@CurrentUser() user: Omit<User, 'password'>, @Query() query: QueryAgentsDto) {
     return this.agentsService.findAll(user.id, query);
+  }
+
+  @Get('management')
+  @ApiOperation({
+    summary: '管理当前账号的全部 Agent（含停用）',
+    description: '仅管理员；保持 userId 隔离，不读取其他账号配置',
+  })
+  @ApiResponse({ status: 200, description: '获取成功' })
+  @ApiResponse({ status: 403, description: '仅管理员可访问' })
+  async management(@CurrentUser() user: Omit<User, 'password'>, @Query() query: QueryAgentsDto) {
+    if (user.role !== UserRole.ADMIN) throw new ForbiddenException('仅管理员可访问管理列表');
+    return this.agentsService.findAll(user.id, query, true);
   }
 
   @Get(':id')

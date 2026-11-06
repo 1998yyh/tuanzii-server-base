@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **角色**: NestJS 后端工程师
 - **技术栈**: TypeScript 5.8（target ES2023）+ NestJS 11 + TypeORM 0.3.17 + MySQL 8.0 + Node 22 + pnpm 10.32.0 + passport-jwt + LangChain/LangGraph 1.x + zod 4 + @nestjs/schedule 6
-- **项目描述**: 团子后台基础服务——JWT 认证 + 日报（AI 情报/汪汪队）+ Agent 平台（多轮会话 / MCP / Skill 子代理 / SSE）+ AI 画布（图/视/音生成）+ A 股多空信号扫描
+- **项目描述**: 团子后台基础服务——JWT 认证 + 日报（AI 情报/汪汪队）+ Agent 平台（多轮会话 / MCP / Skill 按需加载 / SSE）+ AI 画布（图/视/音生成）+ A 股多空信号扫描
 - **领域用词**（以根目录 `CONTEXT.md` 为准）：**AiChannel（AI 渠道）** 是全站唯一的模型凭据入口；模型 **用途** 对应代码里的 `capability`（chat / image / video / audio）；**Agent** 只引用某渠道下「对话」用途的模型，凭据不属于 Agent。禁止把渠道叫成「LLM 配置 / provider 配置」，禁止把 capability 叫成「能力 / 类型 / 模式」。
 
 ## 项目结构
@@ -22,7 +22,7 @@ src/
                   #   + delegate_task 子代理（流式路径由执行器注入）
   mcp-servers/    # 全局 MCP Server 工具库：Admin 集中配置，用户选配给 Agent；
                   #   env/headers AES-256-GCM 加密落库，绝不明文出现在 API 响应
-  skills/         # 技能 CRUD + skill-tool.factory：Skill → DynamicStructuredTool
+  skills/         # 技能 CRUD + GitHub/市场包导入 + skill-tool.factory：当前 Agent 按需读取技能说明/文件
   stock-strategies/ # 观澜固定模板/用户组合策略：JWT、参数校验、版本快照与逻辑删除
   stock-market/   # 观澜行情适配与指标计算，来源和缺失显式返回
   stock-screening/ # 单实例筛选队列，ResearchWatch目标/策略/结果快照
@@ -236,3 +236,5 @@ Agent **不再内嵌** provider / apiKey / baseUrl / model。运行时链路：
 **版本**: v3.0
 **最后更新**: 2026-09-03
 **维护者**: 团子项目组
+
+- GitHub/市场技能包导入与发布说明见 `docs/plans/2026-11-05-skill-package-import-design.md`，DDL 为同日 `skill-package-import.sql`；source/package_files 是可空字段，旧数据不迁移，Skill 统一在当前 Agent 会话中按需读取和执行，工具权限仅来自宿主 Agent。调用机制见 `docs/plans/2026-11-06-current-agent-skills-design.md`。
