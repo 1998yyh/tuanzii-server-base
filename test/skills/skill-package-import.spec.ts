@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { BadRequestException } from '@nestjs/common';
 import { GithubSkillsService } from 'src/skills/import/github-skills.service';
 import {
   parseGithubSource,
@@ -92,8 +93,15 @@ describe('GitHub 技能下载', () => {
   ];
   let entries: { path: string; type: string; mode: string; sha: string; size: number }[];
   let corrupt: boolean;
+  let rawFailure: Error | undefined;
+  let rawStatus: number | undefined;
+  let corruptFallback: boolean;
   beforeEach(() => {
     corrupt = false;
+    rawFailure = undefined;
+    rawStatus = undefined;
+    corruptFallback = false;
+    (assertPublicUrl as jest.Mock).mockImplementation(async (url: string) => new URL(url));
     service = new GithubSkillsService();
     entries = original.map((item) => ({
       path: item.path,
@@ -109,8 +117,16 @@ describe('GitHub 技能下载', () => {
       if (url.includes('/commits/'))
         return Response.json({ sha: revision, commit: { tree: { sha: treeSha } } });
       if (url.includes('/git/trees/')) return Response.json({ tree: entries, truncated: false });
+      if (url.includes('/git/blobs/')) {
+        const item = original.find((file) => url.endsWith('/' + file.sha));
+        if (item) return new Response(corruptFallback ? 'corrupt' : item.content);
+      }
       const item = original.find((file) => url.endsWith('/' + file.path));
-      if (item) return new Response(corrupt ? 'corrupt' : item.content);
+      if (item) {
+        if (rawFailure) throw rawFailure;
+        if (rawStatus) return new Response('', { status: rawStatus });
+        return new Response(corrupt ? 'corrupt' : item.content);
+      }
       throw new Error('Unexpected URL: ' + url);
     });
   });
@@ -145,6 +161,84 @@ describe('GitHub 技能下载', () => {
       expect.stringContaining('https://raw.githubusercontent.com/owner/repo/' + revision),
     );
     expect(spy.mock.calls.every(([, init]) => init.redirect === 'error')).toBe(true);
+  });
+  it.each([new TypeError('fetch failed'), new DOMException('timeout', 'TimeoutError')])(
+    '原始文件网络失败时按 Git blob SHA 从官方 API 读取并校验：%s',
+    async (failure) => {
+      rawFailure = failure;
+      const result = await service.preview(
+        'u',
+        'https://github.com/owner/repo/tree/main/skills/sample',
+      );
+      expect(result.kind).toBe('preview');
+      if (result.kind !== 'preview') return;
+      expect(result.skill.files[0].content).toBe(manifest);
+      const calls = spy.mock.calls.filter(([url]) => String(url).includes('/git/blobs/'));
+      expect(calls).toHaveLength(2);
+      expect(
+        calls.every(
+          ([url, init]) =>
+            String(url).startsWith('https://api.github.com/repos/owner/repo/git/blobs/') &&
+            init.headers.Accept === 'application/vnd.github.raw+json' &&
+            init.redirect === 'error',
+        ),
+      ).toBe(true);
+      expect(assertPublicUrl).toHaveBeenCalledWith(expect.stringContaining('/git/blobs/'));
+      const rawCount = spy.mock.calls.filter(([url]) =>
+        String(url).startsWith('https://raw.githubusercontent.com/'),
+      ).length;
+      await service.preview('u', 'https://github.com/owner/repo/tree/main/skills/sample');
+      expect(
+        spy.mock.calls.filter(([url]) =>
+          String(url).startsWith('https://raw.githubusercontent.com/'),
+        ),
+      ).toHaveLength(rawCount);
+    },
+  );
+  it('备用通道的字节仍须匹配树里的大小和 SHA', async () => {
+    rawFailure = new TypeError('network');
+    corruptFallback = true;
+    await expect(
+      service.preview('u', 'https://github.com/owner/repo/tree/main/skills/sample'),
+    ).rejects.toThrow('校验');
+  });
+  it.each([404, 429])('原始文件 HTTP %s 不作为网络故障重试', async (status) => {
+    rawStatus = status;
+    await expect(
+      service.preview('u', 'https://github.com/owner/repo/tree/main/skills/sample'),
+    ).rejects.toThrow();
+    expect(spy.mock.calls.some(([url]) => String(url).includes('/git/blobs/'))).toBe(false);
+  });
+  it('原始域名未通过公网校验时不绕过拒绝', async () => {
+    (assertPublicUrl as jest.Mock).mockImplementation(async (url: string) => {
+      if (url.startsWith('https://raw.githubusercontent.com/'))
+        throw new BadRequestException('SSRF拒绝');
+      return new URL(url);
+    });
+    await expect(
+      service.preview('u', 'https://github.com/owner/repo/tree/main/skills/sample'),
+    ).rejects.toThrow('SSRF');
+    expect(spy.mock.calls.some(([url]) => String(url).includes('/git/blobs/'))).toBe(false);
+  });
+  it('父请求已取消时不再发起备用下载', async () => {
+    const controller = new AbortController();
+    const originalFetch = spy.getMockImplementation()!;
+    spy.mockImplementation(async (url, init) => {
+      if (String(url).startsWith('https://raw.githubusercontent.com/')) {
+        controller.abort();
+        throw new DOMException('aborted', 'AbortError');
+      }
+      return originalFetch(url, init);
+    });
+    await expect(
+      service.preview(
+        'u',
+        'https://github.com/owner/repo/tree/main/skills/sample',
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toThrow();
+    expect(spy.mock.calls.some(([url]) => String(url).includes('/git/blobs/'))).toBe(false);
   });
   it('拒绝内容被替换的文件', async () => {
     corrupt = true;
