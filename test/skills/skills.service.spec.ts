@@ -231,6 +231,7 @@ describe('SkillsService', () => {
   describe('findByAgentConfig', () => {
     it('应通过关联表查询启用中的 Skill 并带 mcpServers 关系', async () => {
       const qb = {
+        addSelect: jest.fn().mockReturnThis(),
         innerJoin: jest.fn().mockReturnThis(),
         leftJoinAndSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
@@ -263,5 +264,33 @@ describe('SkillsService', () => {
 
       await expect(service.validateForAssociation([])).resolves.toEqual([]);
     });
+  });
+  it('修改导入技能内容时同步 SKILL.md 快照，保留其他文件且不在视图中回传文件', async () => {
+    const imported = {
+      ...baseSkill,
+      source: { kind: 'github', fileCount: 2, totalBytes: 8 } as any,
+      packageFiles: [
+        { path: 'SKILL.md', encoding: 'utf8' as const, content: 'old', size: 3, sha: 'old' },
+        {
+          path: 'references/a.md',
+          encoding: 'utf8' as const,
+          content: 'guide',
+          size: 5,
+          sha: 'guide',
+        },
+      ],
+    };
+    repo.findOne.mockResolvedValue(imported);
+    const qb = {
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(imported),
+    };
+    (repo.createQueryBuilder as jest.Mock).mockReturnValue(qb);
+    const result = await service.update(adminUser, baseSkill.id, { systemPrompt: 'updated' });
+    expect(imported.packageFiles[0].content).toBe('updated');
+    expect(imported.packageFiles[1].content).toBe('guide');
+    expect(result.source).toMatchObject({ modified: true, totalBytes: 12 });
+    expect(result).not.toHaveProperty('packageFiles');
   });
 });

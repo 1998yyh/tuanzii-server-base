@@ -54,10 +54,10 @@ export class AgentsService {
     return this.toResponse(agent, await this.aiChannelsService.getById(agent.channelId));
   }
 
-  async findAll(userId: string, query: QueryAgentsDto) {
+  async findAll(userId: string, query: QueryAgentsDto, includeInactive = false) {
     const { page = 1, limit = 10 } = query;
     const [items, total] = await this.agentRepo.findAndCount({
-      where: { userId, isActive: true },
+      where: includeInactive ? { userId } : { userId, isActive: true },
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,

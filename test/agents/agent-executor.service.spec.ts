@@ -387,11 +387,7 @@ describe('AgentExecutorService', () => {
       await service.run(buildAgent(), 'conv-1', '你好');
 
       expect(skillToolFactory.createToolsForAgent).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          runBatch: expect.any(Function),
-          buildSubTools: expect.any(Function),
-        }),
+        expect.objectContaining({ id: 'agent-1' }),
       );
       expect(mockBindTools).toHaveBeenCalledWith([skillTool]);
     });
@@ -535,5 +531,60 @@ describe('AgentExecutorService', () => {
 
       await expect(service.run(buildAgent(), 'thread-1', 'hi')).rejects.toThrow('不支持对话');
     });
+  });
+  it('读取技能后继续当前 Agent 的工具循环，保留用户任务、系统指令和宿主权限', async () => {
+    const { SkillToolFactory } = await import('src/skills/skill-tool.factory');
+    const factory = new SkillToolFactory({
+      findByAgentConfig: jest.fn().mockResolvedValue([
+        {
+          name: 'report',
+          description: '日报',
+          systemPrompt: '技能步骤：计算并验证',
+          isActive: true,
+          enabledTools: ['web_search'],
+          mcpServers: [{ id: 'legacy' }],
+        },
+      ]),
+    } as any);
+    skillToolFactory.createToolsForAgent.mockImplementation((config) =>
+      factory.createToolsForAgent(config),
+    );
+    toolRegistry.getToolsForAgent.mockResolvedValue([calculatorTool]);
+    mockInvoke
+      .mockResolvedValueOnce(
+        new AIMessage({
+          content: '',
+          tool_calls: [{ name: 'skills_read', args: { name: 'report' }, id: 'read-1' }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        new AIMessage({
+          content: '',
+          tool_calls: [{ name: 'calculator', args: { expression: '6*7' }, id: 'calc-1' }],
+        }),
+      )
+      .mockResolvedValueOnce(new AIMessage({ content: '当前会话完成：42' }));
+    const config = buildAgent({ systemPrompt: '主 Agent 的约束', enabledTools: ['calculator'] });
+    const result = await service.run(config, 'skill-current-session', '$report 请完成今天的任务');
+    expect(result.at(-1)?.content).toBe('当前会话完成：42');
+    expect(mockInvoke).toHaveBeenCalledTimes(3);
+    for (const [messages] of mockInvoke.mock.calls) {
+      expect(messages[0].content).toContain('主 Agent 的约束');
+      expect(messages[0].content).not.toContain('技能步骤');
+      expect(messages.some((m: any) => m.content === '$report 请完成今天的任务')).toBe(true);
+    }
+    expect(
+      mockInvoke.mock.calls[1][0].some(
+        (m: any) => m._getType() === 'tool' && String(m.content).includes('技能步骤：计算并验证'),
+      ),
+    ).toBe(true);
+    expect(mockBindTools.mock.calls[0][0].map((t: any) => t.name)).toEqual([
+      'calculator',
+      'skills_list',
+      'skills_read',
+      'skills_read_file',
+    ]);
+    expect(toolRegistry.getToolsForAgent).toHaveBeenCalledTimes(1);
+    expect(toolRegistry.getToolsForAgent).toHaveBeenCalledWith(config, []);
   });
 });

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Delete,
   Get,
   HttpCode,
@@ -13,7 +14,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { User } from '../users/users.entity';
+import { User, UserRole } from '../users/users.entity';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { McpServersService } from './mcp-servers.service';
@@ -36,6 +37,18 @@ export class McpServersController {
   @ApiResponse({ status: 200, description: '获取成功' })
   async findAll(@Query() query: QueryMcpServerDto) {
     return this.mcpServersService.findAllActive(query);
+  }
+
+  @Get('management')
+  @ApiOperation({
+    summary: '管理全部 MCP 服务（含停用）',
+    description: '仅管理员，env / headers 仍不回显',
+  })
+  @ApiResponse({ status: 200, description: '获取成功' })
+  @ApiResponse({ status: 403, description: '仅管理员可访问' })
+  async management(@CurrentUser() user: Omit<User, 'password'>, @Query() query: QueryMcpServerDto) {
+    if (user.role !== UserRole.ADMIN) throw new ForbiddenException('仅管理员可访问管理列表');
+    return this.mcpServersService.findAllActive(query, true);
   }
 
   @Post()
