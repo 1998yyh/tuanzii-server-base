@@ -43,7 +43,12 @@ describe('观察池历史补查回归', () => {
       ok: true,
       text: async () => 'var _touzibullbear_sh600396={"2026-09-10":"1","2026-09-15":"0"};',
     } as Response);
-    const signals = new StockSignalsService({} as never, signalRepo as never, scanner);
+    const signals = new StockSignalsService(
+      {} as never,
+      signalRepo as never,
+      scanner,
+      watchRepo as never,
+    );
     jest.spyOn(signals, 'chinaToday').mockReturnValue('2026-10-26');
     const service = new WatchlistService(watchRepo as never, signalRepo as never, signals);
 
@@ -84,6 +89,7 @@ describe('观察池历史补查回归', () => {
       {} as never,
       { upsert } as never,
       { scanHistory } as never,
+      {} as never,
     );
     jest.spyOn(service, 'chinaToday').mockReturnValue('2026-10-26');
     expect(
@@ -103,6 +109,7 @@ describe('观察池历史补查回归', () => {
       {} as never,
       { upsert } as never,
       { scanHistory } as never,
+      {} as never,
     );
     expect(await service.refreshWatchlistHistory([])).toEqual({ checked: 0, failed: [] });
     expect(scanHistory).not.toHaveBeenCalled();

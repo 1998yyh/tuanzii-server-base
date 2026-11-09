@@ -6,12 +6,14 @@ import { ScanRunStatus, StockSignalScanRun } from 'src/stock-signals/entities/sc
 import { StockSignal } from 'src/stock-signals/entities/stock-signal.entity';
 import { SinaScannerService } from 'src/stock-signals/sina-scanner.service';
 import { UserRole } from 'src/users/users.entity';
+import { StockWatchlist, WatchlistStatus } from 'src/stock-signals/entities/watchlist.entity';
 
 describe('StockSignalsService', () => {
   let service: StockSignalsService;
   let runRepo: Record<string, jest.Mock>;
   let signalRepo: Record<string, jest.Mock>;
   let scanner: Record<string, jest.Mock>;
+  let watchRepo: Record<string, jest.Mock>;
 
   const user = {
     id: 'user-1',
@@ -46,7 +48,12 @@ describe('StockSignalsService', () => {
     };
     signalRepo = {
       find: jest.fn(),
+      findOne: jest.fn(),
       upsert: jest.fn(),
+    };
+    watchRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     scanner = { scan: jest.fn() };
 
@@ -55,6 +62,7 @@ describe('StockSignalsService', () => {
         StockSignalsService,
         { provide: getRepositoryToken(StockSignalScanRun), useValue: runRepo },
         { provide: getRepositoryToken(StockSignal), useValue: signalRepo },
+        { provide: getRepositoryToken(StockWatchlist), useValue: watchRepo },
         { provide: SinaScannerService, useValue: scanner },
       ],
     }).compile();
@@ -160,6 +168,98 @@ describe('StockSignalsService', () => {
       expect(signalRepo.find).not.toHaveBeenCalled();
       expect(scanner.scan).toHaveBeenCalledTimes(1);
       expect(res.result!.cachedCount).toBe(0);
+    });
+  });
+
+  describe('新数据扫描联动观察池', () => {
+    const watching = {
+      id: 'watch-1',
+      userId: 'user-1',
+      code: '600519',
+      status: WatchlistStatus.WATCHING,
+      entrySignalDate: '2026-07-30',
+    };
+    const fresh = { item: { code: '600519', market: 'sh', name: '贵州茅台' }, value: '0' };
+
+    beforeEach(() => {
+      watchRepo.find.mockResolvedValue([watching]);
+      signalRepo.findOne.mockResolvedValue({
+        code: '600519',
+        value: '0',
+        signalDate: '2026-07-31',
+      });
+    });
+
+    it('忽略缓存扫描返回新 S 后先落库再触发；只核对成功取数代码', async () => {
+      scanner.scan.mockResolvedValue({ results: [fresh], failures: ['SZ000001'] });
+      const response = await service.requestScan(user, {
+        date: '2026-07-31',
+        codes: ['600519', '000001'],
+        refresh: true,
+      });
+      expect(response.result).toMatchObject({ fetchedCount: 1, failed: ['SZ000001'] });
+      expect(watchRepo.find.mock.calls[0][0].where.code.value).toEqual(['600519']);
+      expect(watchRepo.find.mock.calls[0][0].where.status).toBe(WatchlistStatus.WATCHING);
+      expect(watchRepo.update).toHaveBeenCalledWith(
+        { id: 'watch-1', userId: 'user-1', status: WatchlistStatus.WATCHING },
+        { status: WatchlistStatus.TRIGGERED, triggeredSignalDate: '2026-07-31' },
+      );
+      expect(signalRepo.upsert.mock.invocationCallOrder[0]).toBeLessThan(
+        signalRepo.findOne.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('全市场强制扫描在服务端完成评估后才发布 done', async () => {
+      runRepo.findOne.mockResolvedValue(makeRun());
+      scanner.scan.mockResolvedValue({ results: [fresh], failures: [] });
+      let release!: () => void;
+      const evaluating = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      watchRepo.update.mockImplementation(async () => {
+        await evaluating;
+        return { affected: 1 };
+      });
+      await service.requestScan(user, { date: '2026-07-31', refresh: true });
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(watchRepo.update).toHaveBeenCalledTimes(1);
+      expect(
+        runRepo.update.mock.calls.some(([, patch]) => patch.status === ScanRunStatus.DONE),
+      ).toBe(false);
+      release();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(runRepo.update).toHaveBeenCalledWith(
+        'run-new',
+        expect.objectContaining({ status: ScanRunStatus.DONE }),
+      );
+    });
+
+    it('全市场和指定代码的缓存命中不重评估观察池', async () => {
+      runRepo.findOne.mockResolvedValue(makeRun());
+      await service.requestScan(user, { date: '2026-07-31' });
+      signalRepo.find.mockResolvedValue([{ code: '600519', value: '0' }]);
+      scanner.scan.mockResolvedValue({ results: [], failures: [] });
+      await service.requestScan(user, { date: '2026-07-31', codes: ['600519'] });
+      expect(watchRepo.find).not.toHaveBeenCalled();
+      expect(watchRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('取数全失败或信号未成功落库，不触发观察池', async () => {
+      scanner.scan.mockResolvedValue({ results: [], failures: ['SH600519'] });
+      const response = await service.requestScan(user, {
+        date: '2026-07-31',
+        codes: ['600519'],
+        refresh: true,
+      });
+      expect(response.result?.failed).toEqual(['SH600519']);
+      expect(watchRepo.find).not.toHaveBeenCalled();
+      scanner.scan.mockResolvedValue({ results: [fresh], failures: [] });
+      signalRepo.upsert.mockRejectedValue(new Error('DB write failed'));
+      await expect(
+        service.requestScan(user, { date: '2026-07-31', codes: ['600519'], refresh: true }),
+      ).rejects.toThrow('DB write failed');
+      expect(watchRepo.find).not.toHaveBeenCalled();
+      expect(watchRepo.update).not.toHaveBeenCalled();
     });
   });
 

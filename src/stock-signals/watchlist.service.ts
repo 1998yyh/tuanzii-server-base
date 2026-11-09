@@ -1,11 +1,12 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { And, LessThanOrEqual, MoreThan, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { StockSignal } from './entities/stock-signal.entity';
 import { StockWatchlist, WatchlistStatus } from './entities/watchlist.entity';
 import { MAIN_BOARD_CODE, StockSignalsService } from './stock-signals.service';
 import { STOCK_LIST } from './stock-list.data';
 import type { AddWatchlistItemDto } from './dto/add-watchlist-items.dto';
+import { evaluateWatchlist } from './evaluate-watchlist';
 
 /** 单用户观察池上限 */
 const MAX_WATCHLIST_ITEMS = 100;
@@ -160,30 +161,12 @@ export class WatchlistService {
       rows ?? (await this.watchRepo.find({ where: { status: WatchlistStatus.WATCHING } }))
     ).filter((r) => r.status === WatchlistStatus.WATCHING);
 
-    let triggered = 0;
-    for (const row of watching) {
-      const s = await this.signalRepo.findOne({
-        where: {
-          code: row.code,
-          value: '0',
-          signalDate: And(
-            MoreThan(row.entrySignalDate),
-            LessThanOrEqual(this.signalsService.chinaToday()),
-          ),
-        },
-        order: { signalDate: 'DESC' },
-      });
-      if (!s) continue;
-      const update = await this.watchRepo.update(
-        { id: row.id, userId: row.userId, status: WatchlistStatus.WATCHING },
-        {
-          status: WatchlistStatus.TRIGGERED,
-          triggeredSignalDate: s.signalDate,
-        },
-      );
-      triggered += update.affected ?? 0;
-    }
-    return triggered;
+    return evaluateWatchlist(
+      watching,
+      this.watchRepo,
+      this.signalRepo,
+      this.signalsService.chinaToday(),
+    );
   }
 
   /** 是否真实存在的日历日期（DTO 正则只保形状，02-30 之类在这里拦截） */

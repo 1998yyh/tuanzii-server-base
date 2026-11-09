@@ -14,6 +14,8 @@ import { STOCK_LIST, type StockListItem } from './stock-list.data';
 import { SinaScannerService } from './sina-scanner.service';
 import type { CreateScanDto } from './dto/create-scan.dto';
 import { firstRetainedScanDate, scanHistoryToday } from './scan-history-window';
+import { StockWatchlist, WatchlistStatus } from './entities/watchlist.entity';
+import { evaluateWatchlist } from './evaluate-watchlist';
 
 type CurrentUser = Omit<User, 'password'>;
 
@@ -50,6 +52,8 @@ export class StockSignalsService implements OnModuleInit {
     @InjectRepository(StockSignal)
     private readonly signalRepo: Repository<StockSignal>,
     private readonly scanner: SinaScannerService,
+    @InjectRepository(StockWatchlist)
+    private readonly watchRepo: Repository<StockWatchlist>,
   ) {}
 
   /**
@@ -214,6 +218,8 @@ export class StockSignalsService implements OnModuleInit {
         });
       }
 
+      // Publish DONE only after newly fetched signals have reached the watchlist.
+      await this.evaluateFetchedWatchlist(results.map((result) => result.item.code));
       await this.runRepo.update(runId, {
         status: ScanRunStatus.DONE,
         checked: results.length + failures.length,
@@ -282,6 +288,7 @@ export class StockSignalsService implements OnModuleInit {
         })),
         { conflictPaths: ['signalDate', 'code'] },
       );
+      await this.evaluateFetchedWatchlist(results.map((result) => result.item.code));
     }
 
     // 汇总：缓存 + 新抓，B = value '1'
@@ -305,6 +312,21 @@ export class StockSignalsService implements OnModuleInit {
   }
 
   // ---- 观察池复用的内部入口 ----
+
+  /** Evaluate only successfully fetched codes, after persistence; cache hits do not check. */
+  private async evaluateFetchedWatchlist(codes: string[]): Promise<void> {
+    if (!codes.length) return;
+    const rows = await this.watchRepo.find({
+      where: { status: WatchlistStatus.WATCHING, code: In([...new Set(codes)]) },
+    });
+    const triggered = await evaluateWatchlist(
+      rows,
+      this.watchRepo,
+      this.signalRepo,
+      this.chinaToday(),
+    );
+    this.logger.log(`扫描后观察池评估：新取数 ${codes.length} 只，新增触发 ${triggered} 项`);
+  }
 
   /**
    * 内部入口（观察池 cron 用）：确保某日全市场扫描已触发。
